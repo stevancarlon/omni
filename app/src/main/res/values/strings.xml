@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Buddy</string>
+    <string name="accessibility_service_label">Buddy AI Assistant</string>
+    <string name="accessibility_service_description">Buddy uses accessibility services to read your screen and perform actions to fulfill your voice commands.</string>
+</resources>

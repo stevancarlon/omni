@@ -17,6 +17,9 @@ class SettingsRepository(private val context: Context) {
 
     companion object {
         val KEY_API_KEY = stringPreferencesKey("api_key")
+        val KEY_API_KEY_CLAUDE = stringPreferencesKey("api_key_claude")
+        val KEY_API_KEY_OPENAI = stringPreferencesKey("api_key_openai")
+        val KEY_API_KEY_OPENROUTER = stringPreferencesKey("api_key_openrouter")
         val KEY_LLM_PROVIDER = stringPreferencesKey("llm_provider")
         val KEY_LLM_MODEL = stringPreferencesKey("llm_model")
         val KEY_WAKE_WORD_ENABLED = booleanPreferencesKey("wake_word_enabled")
@@ -24,6 +27,9 @@ class SettingsRepository(private val context: Context) {
         val KEY_TTS_ENABLED = booleanPreferencesKey("tts_enabled")
         val KEY_MAX_STEPS = intPreferencesKey("max_steps")
         val KEY_VOICE_SPEED = stringPreferencesKey("voice_speed")
+        val KEY_SPEECH_LANGUAGE = stringPreferencesKey("speech_language")
+        val KEY_SPEECH_PROVIDER = stringPreferencesKey("speech_provider")
+        val KEY_DEEPGRAM_API_KEY = stringPreferencesKey("deepgram_api_key")
         val KEY_SYSTEM_PROMPT = stringPreferencesKey("system_prompt")
 
         const val DEFAULT_SYSTEM_PROMPT = """You are Buddy, an AI assistant that controls an Android device on behalf of the user.
@@ -51,27 +57,50 @@ Actions:
 - wait: {"ms": 2000}
 - done: {"success": true|false, "reason": "explanation"}
 
+The user's goal comes from voice recognition which may mishear app names (e.g. "eye foods" = iFood, "what's up" = WhatsApp, "you tube" = YouTube). Match the user's words against the installed apps list to determine the correct app.
+
 Be precise, methodical, and always verify your actions match the screen state before acting."""
     }
 
     val apiKey: Flow<String> = context.dataStore.data.map { it[KEY_API_KEY] ?: "" }
+    val apiKeyClaude: Flow<String> = context.dataStore.data.map { it[KEY_API_KEY_CLAUDE] ?: "" }
+    val apiKeyOpenai: Flow<String> = context.dataStore.data.map { it[KEY_API_KEY_OPENAI] ?: "" }
+    val apiKeyOpenrouter: Flow<String> = context.dataStore.data.map { it[KEY_API_KEY_OPENROUTER] ?: "" }
     val llmProvider: Flow<String> = context.dataStore.data.map { it[KEY_LLM_PROVIDER] ?: "claude" }
     val llmModel: Flow<String> = context.dataStore.data.map { it[KEY_LLM_MODEL] ?: "claude-opus-4-6" }
     val wakeWordEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_WAKE_WORD_ENABLED] ?: true }
     val wakeWord: Flow<String> = context.dataStore.data.map { it[KEY_WAKE_WORD] ?: "Hey Buddy" }
     val ttsEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_TTS_ENABLED] ?: true }
     val maxSteps: Flow<Int> = context.dataStore.data.map { it[KEY_MAX_STEPS] ?: 30 }
+    val speechLanguage: Flow<String> = context.dataStore.data.map { it[KEY_SPEECH_LANGUAGE] ?: "" }
+    val speechProvider: Flow<String> = context.dataStore.data.map { it[KEY_SPEECH_PROVIDER] ?: "builtin" }
+    val deepgramApiKey: Flow<String> = context.dataStore.data.map { it[KEY_DEEPGRAM_API_KEY] ?: "" }
     val systemPrompt: Flow<String> = context.dataStore.data.map {
         it[KEY_SYSTEM_PROMPT] ?: DEFAULT_SYSTEM_PROMPT
     }
 
     suspend fun setApiKey(value: String) = context.dataStore.edit { it[KEY_API_KEY] = value }
+    suspend fun setApiKeyClaude(value: String) = context.dataStore.edit { it[KEY_API_KEY_CLAUDE] = value }
+    suspend fun setApiKeyOpenai(value: String) = context.dataStore.edit { it[KEY_API_KEY_OPENAI] = value }
+    suspend fun setApiKeyOpenrouter(value: String) = context.dataStore.edit { it[KEY_API_KEY_OPENROUTER] = value }
+
+    fun apiKeyForProvider(provider: String): Flow<String> = context.dataStore.data.map {
+        when (provider) {
+            "claude" -> it[KEY_API_KEY_CLAUDE] ?: it[KEY_API_KEY] ?: ""
+            "openai" -> it[KEY_API_KEY_OPENAI] ?: ""
+            "openrouter" -> it[KEY_API_KEY_OPENROUTER] ?: ""
+            else -> it[KEY_API_KEY] ?: ""
+        }
+    }
     suspend fun setLlmProvider(value: String) = context.dataStore.edit { it[KEY_LLM_PROVIDER] = value }
     suspend fun setLlmModel(value: String) = context.dataStore.edit { it[KEY_LLM_MODEL] = value }
     suspend fun setWakeWordEnabled(value: Boolean) = context.dataStore.edit { it[KEY_WAKE_WORD_ENABLED] = value }
     suspend fun setWakeWord(value: String) = context.dataStore.edit { it[KEY_WAKE_WORD] = value }
     suspend fun setTtsEnabled(value: Boolean) = context.dataStore.edit { it[KEY_TTS_ENABLED] = value }
     suspend fun setMaxSteps(value: Int) = context.dataStore.edit { it[KEY_MAX_STEPS] = value }
+    suspend fun setSpeechLanguage(value: String) = context.dataStore.edit { it[KEY_SPEECH_LANGUAGE] = value }
+    suspend fun setSpeechProvider(value: String) = context.dataStore.edit { it[KEY_SPEECH_PROVIDER] = value }
+    suspend fun setDeepgramApiKey(value: String) = context.dataStore.edit { it[KEY_DEEPGRAM_API_KEY] = value }
     suspend fun setSystemPrompt(value: String) = context.dataStore.edit { it[KEY_SYSTEM_PROMPT] = value }
 
 }

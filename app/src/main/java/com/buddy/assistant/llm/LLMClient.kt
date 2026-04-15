@@ -32,17 +32,22 @@ class LLMClient(private val app: BuddyApplication) {
     suspend fun getNextAction(
         goal: String,
         screenDescription: String,
-        history: List<Map<String, String>>
+        history: List<Map<String, String>>,
+        voiceCandidates: List<String> = listOf(goal)
     ): LLMResponse {
         val provider = app.settingsRepository.llmProvider.first()
         val model = app.settingsRepository.llmModel.first()
-        val apiKey = app.settingsRepository.apiKey.first()
+        val apiKey = app.settingsRepository.apiKeyForProvider(provider).first()
         val systemPrompt = app.settingsRepository.systemPrompt.first()
 
-        if (apiKey.isBlank()) throw IllegalStateException("API key not configured")
+        if (apiKey.isBlank()) throw IllegalStateException("API key not configured for $provider")
 
         val userMessage = buildString {
             appendLine("Goal: $goal")
+            if (voiceCandidates.size > 1) {
+                appendLine("Voice recognition alternatives: ${voiceCandidates.joinToString(" | ")}")
+                appendLine("(Pick the interpretation that best matches an installed app or makes the most sense)")
+            }
             appendLine()
             appendLine("Installed apps:")
             appendLine(getInstalledApps())
@@ -181,18 +186,10 @@ class LLMClient(private val app: BuddyApplication) {
     }
 
     private fun parseAgentResponse(rawJson: String): LLMResponse {
-        // Extract JSON from markdown code blocks if present
-        val jsonStr = rawJson.let {
-            val jsonStart = it.indexOf('{')
-            val jsonEnd = it.lastIndexOf('}')
-            if (jsonStart >= 0 && jsonEnd > jsonStart) it.substring(jsonStart, jsonEnd + 1) else it
-        }
-
-        val json = try {
-            gson.fromJson(jsonStr, JsonObject::class.java)
-        } catch (e: Exception) {
-            throw IOException("Failed to parse LLM response as JSON: $rawJson")
-        }
+        // Try parsing the whole response first, then try extracting JSON
+        val json = tryParseJson(rawJson)
+            ?: tryParseJson(extractJsonBlock(rawJson))
+            ?: throw IOException("Failed to parse LLM response as JSON: ${rawJson.take(500)}")
 
         val think = json.get("think")?.asString ?: ""
         val actionObj = json.getAsJsonObject("action") ?: throw IOException("No action in response")
@@ -228,5 +225,38 @@ class LLMClient(private val app: BuddyApplication) {
         }
 
         return LLMResponse(think, actionType, action, rawJson)
+    }
+
+    private fun tryParseJson(text: String): JsonObject? {
+        return try {
+            val obj = gson.fromJson(text.trim(), JsonObject::class.java)
+            if (obj?.has("action") == true) obj else null
+        } catch (_: Exception) { null }
+    }
+
+    private fun extractJsonBlock(text: String): String {
+        // Find balanced JSON object containing "action"
+        var depth = 0
+        var start = -1
+        for (i in text.indices) {
+            when (text[i]) {
+                '{' -> {
+                    if (depth == 0) start = i
+                    depth++
+                }
+                '}' -> {
+                    depth--
+                    if (depth == 0 && start >= 0) {
+                        val candidate = text.substring(start, i + 1)
+                        if (candidate.contains("\"action\"")) return candidate
+                        start = -1
+                    }
+                }
+            }
+        }
+        // Fallback: first { to last }
+        val first = text.indexOf('{')
+        val last = text.lastIndexOf('}')
+        return if (first >= 0 && last > first) text.substring(first, last + 1) else text
     }
 }

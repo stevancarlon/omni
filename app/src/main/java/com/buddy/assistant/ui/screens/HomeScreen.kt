@@ -114,8 +114,7 @@ private fun ActionButtons(
                 StopButton("Stop") { agentController.reset() }
             is AgentStatus.WakeWordListening, is AgentStatus.VoiceListening ->
                 StopButton("Stop Listening", Icons.Default.MicOff) {
-                    activity?.stopListenerService()
-                    agentController.reset()
+                    activity?.stopCommandListening()
                 }
             is AgentStatus.Speaking -> {}
         }

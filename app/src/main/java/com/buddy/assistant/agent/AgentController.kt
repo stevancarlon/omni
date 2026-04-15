@@ -26,7 +26,7 @@ class AgentController private constructor(private val app: BuddyApplication) {
     init {
         tts = TextToSpeech(app) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.US
+                tts?.language = Locale.getDefault()
                 tts?.setSpeechRate(1.1f)
             }
         }
@@ -37,10 +37,10 @@ class AgentController private constructor(private val app: BuddyApplication) {
         speak("Yes?")
     }
 
-    fun onCommandReceived(command: String) {
+    fun onCommandReceived(command: String, candidates: List<String> = listOf(command)) {
         addLog("User: $command")
         agentJob?.cancel()
-        agentJob = scope.launch { runAgentLoop(command) }
+        agentJob = scope.launch { runAgentLoop(command, candidates) }
     }
 
     fun reset() {
@@ -51,7 +51,7 @@ class AgentController private constructor(private val app: BuddyApplication) {
 
     // ─── Agent Loop ──────────────────────────────────────────────────────────
 
-    private suspend fun runAgentLoop(goal: String) {
+    private suspend fun runAgentLoop(goal: String, voiceCandidates: List<String> = listOf(goal)) {
         val service = BuddyAccessibilityService.instance
         if (service == null) {
             fail("Accessibility service not enabled. Please enable Buddy in Accessibility Settings.")
@@ -79,7 +79,7 @@ class AgentController private constructor(private val app: BuddyApplication) {
             addLog("Step $step: Reading screen (${screen.lines().size} elements)")
 
             val response = try {
-                llmClient.getNextAction(goal, screen, history)
+                llmClient.getNextAction(goal, screen, history, voiceCandidates)
             } catch (e: Exception) {
                 addLog("LLM error: ${e.message}")
                 fail("LLM error: ${e.message}")

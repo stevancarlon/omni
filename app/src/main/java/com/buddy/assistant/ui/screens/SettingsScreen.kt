@@ -32,7 +32,9 @@ fun SettingsScreen(onBack: () -> Unit) {
     val repo = app.settingsRepository
     val scope = rememberCoroutineScope()
 
-    var apiKey by remember { mutableStateOf("") }
+    var claudeKey by remember { mutableStateOf("") }
+    var openaiKey by remember { mutableStateOf("") }
+    var openrouterKey by remember { mutableStateOf("") }
     var provider by remember { mutableStateOf("claude") }
     var model by remember { mutableStateOf("claude-opus-4-6") }
     var wakeWordEnabled by remember { mutableStateOf(true) }
@@ -40,16 +42,25 @@ fun SettingsScreen(onBack: () -> Unit) {
     var ttsEnabled by remember { mutableStateOf(true) }
     var maxSteps by remember { mutableStateOf("30") }
     var showApiKey by remember { mutableStateOf(false) }
+    var speechProvider by remember { mutableStateOf("builtin") }
+    var deepgramApiKey by remember { mutableStateOf("") }
+    var showDeepgramKey by remember { mutableStateOf(false) }
+    var speechLanguage by remember { mutableStateOf("") }
 
     // Load saved values
     LaunchedEffect(Unit) {
-        apiKey = repo.apiKey.first()
+        claudeKey = repo.apiKeyClaude.first().ifBlank { repo.apiKey.first() }
+        openaiKey = repo.apiKeyOpenai.first()
+        openrouterKey = repo.apiKeyOpenrouter.first()
         provider = repo.llmProvider.first()
         model = repo.llmModel.first()
         wakeWordEnabled = repo.wakeWordEnabled.first()
         wakeWord = repo.wakeWord.first()
         ttsEnabled = repo.ttsEnabled.first()
         maxSteps = repo.maxSteps.first().toString()
+        speechProvider = repo.speechProvider.first()
+        deepgramApiKey = repo.deepgramApiKey.first()
+        speechLanguage = repo.speechLanguage.first()
     }
 
     val bgGradient = Brush.verticalGradient(
@@ -115,31 +126,31 @@ fun SettingsScreen(onBack: () -> Unit) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // API Key
-            OutlinedTextField(
-                value = apiKey,
-                onValueChange = { apiKey = it; scope.launch { repo.setApiKey(it) } },
-                label = { Text("API Key", color = Color.White.copy(alpha = 0.7f)) },
-                placeholder = { Text("sk-ant-...", color = Color.White.copy(alpha = 0.3f)) },
-                visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon = {
-                    IconButton(onClick = { showApiKey = !showApiKey }) {
-                        Icon(
-                            if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.7f)
-                        )
-                    }
-                },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedBorderColor = Color(0xFF6C63FF),
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
-                ),
+            ApiKeyField("Claude API Key", "sk-ant-...", claudeKey, showApiKey) {
+                claudeKey = it; scope.launch { repo.setApiKeyClaude(it) }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            ApiKeyField("OpenAI API Key", "sk-...", openaiKey, showApiKey) {
+                openaiKey = it; scope.launch { repo.setApiKeyOpenai(it) }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            ApiKeyField("OpenRouter API Key", "sk-or-...", openrouterKey, showApiKey) {
+                openrouterKey = it; scope.launch { repo.setApiKeyOpenrouter(it) }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
-            )
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(onClick = { showApiKey = !showApiKey }) {
+                    Text(
+                        if (showApiKey) "Hide keys" else "Show keys",
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontSize = 12.sp
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -192,6 +203,113 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
 
             Spacer(modifier = Modifier.height(32.dp))
+            SettingsSectionTitle("Speech Recognition")
+
+            // Provider selection
+            val speechProviders = listOf("builtin" to "Built-in (Android)", "deepgram" to "Deepgram (Streaming)")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                speechProviders.forEach { (id, label) ->
+                    FilterChip(
+                        selected = speechProvider == id,
+                        onClick = {
+                            speechProvider = id
+                            scope.launch { repo.setSpeechProvider(id) }
+                        },
+                        label = { Text(label, color = Color.White, fontSize = 12.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFF6C63FF),
+                            containerColor = Color.White.copy(alpha = 0.1f)
+                        )
+                    )
+                }
+            }
+
+            if (speechProvider == "deepgram") {
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = deepgramApiKey,
+                    onValueChange = { deepgramApiKey = it; scope.launch { repo.setDeepgramApiKey(it) } },
+                    label = { Text("Deepgram API Key", color = Color.White.copy(alpha = 0.7f)) },
+                    placeholder = { Text("dg-...", color = Color.White.copy(alpha = 0.3f)) },
+                    visualTransformation = if (showDeepgramKey) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { showDeepgramKey = !showDeepgramKey }) {
+                            Icon(
+                                if (showDeepgramKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.7f)
+                            )
+                        }
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFF6C63FF),
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            val languages = listOf(
+                "" to "System Default",
+                "en-US" to "English (US)",
+                "en-GB" to "English (UK)",
+                "pt-BR" to "Portuguese (Brazil)",
+                "pt-PT" to "Portuguese (Portugal)",
+                "es-ES" to "Spanish (Spain)",
+                "es-MX" to "Spanish (Mexico)",
+                "fr-FR" to "French",
+                "de-DE" to "German",
+                "it-IT" to "Italian",
+                "ja-JP" to "Japanese",
+                "ko-KR" to "Korean",
+                "zh-CN" to "Chinese (Simplified)",
+                "hi-IN" to "Hindi"
+            )
+
+            var languageExpanded by remember { mutableStateOf(false) }
+            val selectedLabel = languages.firstOrNull { it.first == speechLanguage }?.second ?: "System Default"
+
+            ExposedDropdownMenuBox(
+                expanded = languageExpanded,
+                onExpandedChange = { languageExpanded = it }
+            ) {
+                OutlinedTextField(
+                    value = selectedLabel,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Language", color = Color.White.copy(alpha = 0.7f)) },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = languageExpanded) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFF6C63FF),
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
+                    ),
+                    modifier = Modifier.fillMaxWidth().menuAnchor()
+                )
+                ExposedDropdownMenu(
+                    expanded = languageExpanded,
+                    onDismissRequest = { languageExpanded = false }
+                ) {
+                    languages.forEach { (code, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            onClick = {
+                                speechLanguage = code
+                                scope.launch { repo.setSpeechLanguage(code) }
+                                languageExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
             SettingsSectionTitle("Behavior")
 
             Row(
@@ -232,6 +350,32 @@ fun SettingsScreen(onBack: () -> Unit) {
             Spacer(modifier = Modifier.height(80.dp))
         }
     }
+}
+
+@Composable
+private fun ApiKeyField(
+    label: String,
+    placeholder: String,
+    value: String,
+    visible: Boolean,
+    onValueChange: (String) -> Unit
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label, color = Color.White.copy(alpha = 0.7f)) },
+        placeholder = { Text(placeholder, color = Color.White.copy(alpha = 0.3f)) },
+        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = Color.White,
+            unfocusedTextColor = Color.White,
+            focusedBorderColor = Color(0xFF6C63FF),
+            unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
+        ),
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+    )
 }
 
 @Composable

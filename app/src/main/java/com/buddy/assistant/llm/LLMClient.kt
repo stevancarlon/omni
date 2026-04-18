@@ -64,6 +64,7 @@ class LLMClient(private val app: BuddyApplication) {
             "claude" -> callClaudeAPI(apiKey, model, systemPrompt, messages)
             "openai" -> callOpenAIAPI(apiKey, model, systemPrompt, messages)
             "openrouter" -> callOpenRouterAPI(apiKey, model, systemPrompt, messages)
+            "groq" -> callGroqAPI(apiKey, model, systemPrompt, messages)
             else -> callClaudeAPI(apiKey, model, systemPrompt, messages)
         }
     }
@@ -172,6 +173,42 @@ class LLMClient(private val app: BuddyApplication) {
         return parseAgentResponse(content)
     }
 
+    private fun callGroqAPI(
+        apiKey: String,
+        model: String,
+        systemPrompt: String,
+        messages: List<Map<String, String>>
+    ): LLMResponse {
+        val allMessages = mutableListOf(mapOf("role" to "system", "content" to systemPrompt))
+        allMessages.addAll(messages)
+
+        val body = gson.toJson(mapOf(
+            "model" to model,
+            "max_tokens" to 1024,
+            "messages" to allMessages,
+            "response_format" to mapOf("type" to "json_object")
+        ))
+
+        val request = Request.Builder()
+            .url("https://api.groq.com/openai/v1/chat/completions")
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .header("Authorization", "Bearer $apiKey")
+            .header("Content-Type", "application/json")
+            .build()
+
+        val response = client.newCall(request).execute()
+        val responseBody = response.body?.string() ?: throw IOException("Empty response")
+        if (!response.isSuccessful) throw IOException("API error ${response.code}: $responseBody")
+
+        val json = gson.fromJson(responseBody, JsonObject::class.java)
+        val content = json.getAsJsonArray("choices")
+            .get(0).asJsonObject
+            .getAsJsonObject("message")
+            .get("content").asString
+
+        return parseAgentResponse(content)
+    }
+
     private fun getInstalledApps(): String {
         val pm = app.packageManager
         val launchIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
@@ -214,7 +251,10 @@ class LLMClient(private val app: BuddyApplication) {
             "press_back" -> AgentAction.PressBack
             "press_home" -> AgentAction.PressHome
             "press_recents" -> AgentAction.PressRecents
-            "open_app" -> AgentAction.OpenApp(params.get("package")?.asString ?: "")
+            "open_app" -> AgentAction.OpenApp(
+                packageName = params.get("package")?.asString ?: "",
+                name = params.get("name")?.asString
+            )
             "open_url" -> AgentAction.OpenUrl(params.get("url")?.asString ?: "")
             "wait" -> AgentAction.Wait(params.get("ms")?.asLong ?: 2000L)
             "done" -> AgentAction.Done(

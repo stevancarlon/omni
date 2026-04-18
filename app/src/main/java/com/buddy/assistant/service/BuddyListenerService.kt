@@ -323,15 +323,22 @@ class BuddyListenerService : Service() {
         updateNotification("Wake word detected!")
         agentController.onWakeWordDetected()
 
-        val overlayIntent = Intent(this, BuddyOverlayService::class.java).apply {
-            action = BuddyOverlayService.ACTION_SHOW
+        if (!isAppInForeground()) {
+            val overlayIntent = Intent(this, BuddyOverlayService::class.java).apply {
+                action = BuddyOverlayService.ACTION_SHOW
+            }
+            startService(overlayIntent)
         }
-        startService(overlayIntent)
 
         scope.launch {
             delay(300)
             startCommandListening()
         }
+    }
+
+    private fun isAppInForeground(): Boolean {
+        val am = getSystemService(android.app.ActivityManager::class.java)
+        return am.appTasks.any { it.taskInfo?.topActivity?.packageName == packageName }
     }
 
     private fun onCommandReceived(command: String, candidates: List<String> = listOf(command)) {

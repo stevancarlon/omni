@@ -20,6 +20,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_API_KEY_CLAUDE = stringPreferencesKey("api_key_claude")
         val KEY_API_KEY_OPENAI = stringPreferencesKey("api_key_openai")
         val KEY_API_KEY_OPENROUTER = stringPreferencesKey("api_key_openrouter")
+        val KEY_API_KEY_GROQ = stringPreferencesKey("api_key_groq")
         val KEY_LLM_PROVIDER = stringPreferencesKey("llm_provider")
         val KEY_LLM_MODEL = stringPreferencesKey("llm_model")
         val KEY_WAKE_WORD_ENABLED = booleanPreferencesKey("wake_word_enabled")
@@ -52,12 +53,14 @@ Actions:
 - press_back: {}
 - press_home: {}
 - press_recents: {}
-- open_app: {"package": "com.example.app"}
+- open_app: {"package": "com.example.app", "name": "App Label"}  // ALWAYS copy the exact package from the Installed apps list AND include the label as "name". If unsure of the package, use {"name": "YouTube"} alone and Buddy will resolve it.
 - open_url: {"url": "https://example.com"}
 - wait: {"ms": 2000}
 - done: {"success": true|false, "reason": "explanation"}
 
 The user's goal comes from voice recognition which may mishear app names (e.g. "eye foods" = iFood, "what's up" = WhatsApp, "you tube" = YouTube). Match the user's words against the installed apps list to determine the correct app.
+
+CRITICAL for open_app: NEVER invent a package name. Only use package strings that appear verbatim in the Installed apps list. Always include a "name" param with the app label from the list so Buddy can self-correct if the package is wrong. If a requested app is not in the list, respond with done(success=false, reason="App not installed: ...").
 
 Be precise, methodical, and always verify your actions match the screen state before acting."""
     }
@@ -66,6 +69,7 @@ Be precise, methodical, and always verify your actions match the screen state be
     val apiKeyClaude: Flow<String> = context.dataStore.data.map { it[KEY_API_KEY_CLAUDE] ?: "" }
     val apiKeyOpenai: Flow<String> = context.dataStore.data.map { it[KEY_API_KEY_OPENAI] ?: "" }
     val apiKeyOpenrouter: Flow<String> = context.dataStore.data.map { it[KEY_API_KEY_OPENROUTER] ?: "" }
+    val apiKeyGroq: Flow<String> = context.dataStore.data.map { it[KEY_API_KEY_GROQ] ?: "" }
     val llmProvider: Flow<String> = context.dataStore.data.map { it[KEY_LLM_PROVIDER] ?: "claude" }
     val llmModel: Flow<String> = context.dataStore.data.map { it[KEY_LLM_MODEL] ?: "claude-opus-4-6" }
     val wakeWordEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_WAKE_WORD_ENABLED] ?: true }
@@ -83,12 +87,14 @@ Be precise, methodical, and always verify your actions match the screen state be
     suspend fun setApiKeyClaude(value: String) = context.dataStore.edit { it[KEY_API_KEY_CLAUDE] = value }
     suspend fun setApiKeyOpenai(value: String) = context.dataStore.edit { it[KEY_API_KEY_OPENAI] = value }
     suspend fun setApiKeyOpenrouter(value: String) = context.dataStore.edit { it[KEY_API_KEY_OPENROUTER] = value }
+    suspend fun setApiKeyGroq(value: String) = context.dataStore.edit { it[KEY_API_KEY_GROQ] = value }
 
     fun apiKeyForProvider(provider: String): Flow<String> = context.dataStore.data.map {
         when (provider) {
             "claude" -> it[KEY_API_KEY_CLAUDE] ?: it[KEY_API_KEY] ?: ""
             "openai" -> it[KEY_API_KEY_OPENAI] ?: ""
             "openrouter" -> it[KEY_API_KEY_OPENROUTER] ?: ""
+            "groq" -> it[KEY_API_KEY_GROQ] ?: ""
             else -> it[KEY_API_KEY] ?: ""
         }
     }

@@ -142,6 +142,7 @@ private fun OverlayContent(
     onDismiss: () -> Unit
 ) {
     val status by agentController.status.collectAsState()
+    val think by agentController.currentThink.collectAsState()
 
     val statusColor by animateColorAsState(
         targetValue = when (status) {
@@ -210,14 +211,24 @@ private fun OverlayContent(
                     .background(statusColor)
             )
 
-            Text(
-                text = statusText,
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                textAlign = TextAlign.Start,
-                modifier = Modifier.weight(1f, fill = false)
-            )
+            Column(modifier = Modifier.weight(1f, fill = true)) {
+                Text(
+                    text = statusText,
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Start
+                )
+                if (think.isNotBlank()) {
+                    Text(
+                        text = think.take(120),
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Start,
+                        maxLines = 2
+                    )
+                }
+            }
 
             Text(
                 text = "✕",

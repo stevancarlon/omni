@@ -81,6 +81,15 @@
             </intent-filter>
         </receiver>
 
+        <!-- Debug: inject a command via adb broadcast (bypasses mic) -->
+        <receiver
+            android:name=".receiver.TestCommandReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.buddy.assistant.TEST_COMMAND" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

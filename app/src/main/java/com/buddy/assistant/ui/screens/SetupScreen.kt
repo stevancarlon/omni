@@ -1,6 +1,7 @@
 package com.buddy.assistant.ui.screens
 
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -106,6 +107,23 @@ fun SetupScreen(onBack: () -> Unit) {
                 description = "Buddy needs microphone access to hear your voice commands.",
                 buttonText = "Already granted if you see this",
                 onClick = {}
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            SetupStep(
+                number = 5,
+                title = "Allow Overlay",
+                description = "Buddy shows a floating status overlay while it's working, so you can see what it's doing on top of other apps.",
+                buttonText = "Open Overlay Settings",
+                onClick = {
+                    context.startActivity(
+                        Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:${context.packageName}")
+                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }
             )
 
             Spacer(modifier = Modifier.height(80.dp))

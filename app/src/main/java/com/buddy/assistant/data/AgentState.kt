@@ -45,7 +45,7 @@ sealed class AgentAction {
     object PressBack : AgentAction()
     object PressHome : AgentAction()
     object PressRecents : AgentAction()
-    data class OpenApp(val packageName: String) : AgentAction()
+    data class OpenApp(val packageName: String, val name: String? = null) : AgentAction()
     data class OpenUrl(val url: String) : AgentAction()
     data class Wait(val ms: Long) : AgentAction()
     data class Done(val success: Boolean, val reason: String) : AgentAction()

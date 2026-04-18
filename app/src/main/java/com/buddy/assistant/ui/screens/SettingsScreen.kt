@@ -35,6 +35,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     var claudeKey by remember { mutableStateOf("") }
     var openaiKey by remember { mutableStateOf("") }
     var openrouterKey by remember { mutableStateOf("") }
+    var groqKey by remember { mutableStateOf("") }
     var provider by remember { mutableStateOf("claude") }
     var model by remember { mutableStateOf("claude-opus-4-6") }
     var wakeWordEnabled by remember { mutableStateOf(true) }
@@ -52,6 +53,7 @@ fun SettingsScreen(onBack: () -> Unit) {
         claudeKey = repo.apiKeyClaude.first().ifBlank { repo.apiKey.first() }
         openaiKey = repo.apiKeyOpenai.first()
         openrouterKey = repo.apiKeyOpenrouter.first()
+        groqKey = repo.apiKeyGroq.first()
         provider = repo.llmProvider.first()
         model = repo.llmModel.first()
         wakeWordEnabled = repo.wakeWordEnabled.first()
@@ -100,7 +102,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             SettingsSectionTitle("LLM Provider")
 
             // Provider selection
-            val providers = listOf("claude", "openai", "openrouter")
+            val providers = listOf("claude", "openai", "groq", "openrouter")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 providers.forEach { p ->
                     FilterChip(
@@ -111,6 +113,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                             model = when (p) {
                                 "claude" -> "claude-opus-4-6"
                                 "openai" -> "gpt-4o"
+                                "groq" -> "llama-3.3-70b-versatile"
                                 else -> "anthropic/claude-opus-4-6"
                             }
                             scope.launch { repo.setLlmModel(model) }
@@ -137,6 +140,10 @@ fun SettingsScreen(onBack: () -> Unit) {
             ApiKeyField("OpenRouter API Key", "sk-or-...", openrouterKey, showApiKey) {
                 openrouterKey = it; scope.launch { repo.setApiKeyOpenrouter(it) }
             }
+            Spacer(modifier = Modifier.height(8.dp))
+            ApiKeyField("Groq API Key", "gsk_...", groqKey, showApiKey) {
+                groqKey = it; scope.launch { repo.setApiKeyGroq(it) }
+            }
 
             Spacer(modifier = Modifier.height(4.dp))
             Row(
@@ -154,19 +161,73 @@ fun SettingsScreen(onBack: () -> Unit) {
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Model
-            OutlinedTextField(
-                value = model,
-                onValueChange = { model = it; scope.launch { repo.setLlmModel(it) } },
-                label = { Text("Model", color = Color.White.copy(alpha = 0.7f)) },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedBorderColor = Color(0xFF6C63FF),
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
-                ),
-                modifier = Modifier.fillMaxWidth()
-            )
+            // Model selection
+            val modelOptions = when (provider) {
+                "claude" -> listOf(
+                    "claude-sonnet-4-6" to "Claude Sonnet 4.6 (fast)",
+                    "claude-opus-4-6" to "Claude Opus 4.6 (smart)",
+                    "claude-haiku-4-5-20251001" to "Claude Haiku 4.5 (fastest)",
+                )
+                "openai" -> listOf(
+                    "gpt-4o" to "GPT-4o",
+                    "gpt-4o-mini" to "GPT-4o Mini (fast)",
+                    "gpt-4.1" to "GPT-4.1",
+                    "gpt-4.1-mini" to "GPT-4.1 Mini (fast)",
+                    "gpt-4.1-nano" to "GPT-4.1 Nano (fastest)",
+                )
+                "groq" -> listOf(
+                    "llama-3.3-70b-versatile" to "Llama 3.3 70B (best)",
+                    "llama-3.1-8b-instant" to "Llama 3.1 8B (fastest)",
+                    "llama-4-scout-17b-16e-instruct" to "Llama 4 Scout",
+                    "mixtral-8x7b-32768" to "Mixtral 8x7B",
+                )
+                "openrouter" -> listOf(
+                    "anthropic/claude-sonnet-4-6" to "Claude Sonnet 4.6",
+                    "anthropic/claude-haiku-4-5-20251001" to "Claude Haiku 4.5",
+                    "openai/gpt-4o-mini" to "GPT-4o Mini",
+                    "meta-llama/llama-3.3-70b-instruct" to "Llama 3.3 70B",
+                    "google/gemini-2.5-flash" to "Gemini 2.5 Flash",
+                )
+                else -> emptyList()
+            }
+
+            var modelMenuExpanded by remember { mutableStateOf(false) }
+            val selectedLabel = modelOptions.firstOrNull { it.first == model }?.second ?: model
+
+            ExposedDropdownMenuBox(
+                expanded = modelMenuExpanded,
+                onExpandedChange = { modelMenuExpanded = it }
+            ) {
+                OutlinedTextField(
+                    value = selectedLabel,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Model", color = Color.White.copy(alpha = 0.7f)) },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelMenuExpanded) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFF6C63FF),
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
+                    ),
+                    modifier = Modifier.fillMaxWidth().menuAnchor()
+                )
+                ExposedDropdownMenu(
+                    expanded = modelMenuExpanded,
+                    onDismissRequest = { modelMenuExpanded = false }
+                ) {
+                    modelOptions.forEach { (id, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            onClick = {
+                                model = id
+                                scope.launch { repo.setLlmModel(id) }
+                                modelMenuExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(32.dp))
             SettingsSectionTitle("Wake Word")
@@ -272,14 +333,14 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
 
             var languageExpanded by remember { mutableStateOf(false) }
-            val selectedLabel = languages.firstOrNull { it.first == speechLanguage }?.second ?: "System Default"
+            val selectedLanguageLabel = languages.firstOrNull { it.first == speechLanguage }?.second ?: "System Default"
 
             ExposedDropdownMenuBox(
                 expanded = languageExpanded,
                 onExpandedChange = { languageExpanded = it }
             ) {
                 OutlinedTextField(
-                    value = selectedLabel,
+                    value = selectedLanguageLabel,
                     onValueChange = {},
                     readOnly = true,
                     label = { Text("Language", color = Color.White.copy(alpha = 0.7f)) },

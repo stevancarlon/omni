@@ -1,11 +1,13 @@
 package com.buddy.assistant.agent
 
+import android.content.Intent
 import android.speech.tts.TextToSpeech
 import com.buddy.assistant.BuddyApplication
 import com.buddy.assistant.data.AgentAction
 import com.buddy.assistant.data.AgentStatus
 import com.buddy.assistant.llm.LLMClient
 import com.buddy.assistant.service.BuddyAccessibilityService
+import com.buddy.assistant.service.BuddyOverlayService
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.util.Locale
@@ -23,6 +25,9 @@ class AgentController private constructor(private val app: BuddyApplication) {
     private val _log = MutableStateFlow<List<String>>(emptyList())
     val log: StateFlow<List<String>> = _log.asStateFlow()
 
+    private val _currentThink = MutableStateFlow("")
+    val currentThink: StateFlow<String> = _currentThink.asStateFlow()
+
     init {
         tts = TextToSpeech(app) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -34,13 +39,33 @@ class AgentController private constructor(private val app: BuddyApplication) {
 
     fun onWakeWordDetected() {
         _status.value = AgentStatus.VoiceListening
-        speak("Yes?")
+        _currentThink.value = ""
+        showOverlay()
+        playTone()
+    }
+
+    private fun playTone() {
+        try {
+            val toneGen = android.media.ToneGenerator(android.media.AudioManager.STREAM_MUSIC, 60)
+            toneGen.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 150)
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ toneGen.release() }, 300)
+        } catch (_: Exception) {}
     }
 
     fun onCommandReceived(command: String, candidates: List<String> = listOf(command)) {
         addLog("User: $command")
+        _currentThink.value = command
+        showOverlay()
         agentJob?.cancel()
         agentJob = scope.launch { runAgentLoop(command, candidates) }
+    }
+
+    private fun showOverlay() {
+        try {
+            app.startService(Intent(app, BuddyOverlayService::class.java).apply {
+                action = BuddyOverlayService.ACTION_SHOW
+            })
+        } catch (_: Exception) {}
     }
 
     fun reset() {
@@ -65,7 +90,6 @@ class AgentController private constructor(private val app: BuddyApplication) {
         var lastScreenHash = ""
 
         _status.value = AgentStatus.Processing(goal)
-        speak("On it!")
         addLog("Starting task: $goal")
 
         for (step in 1..maxSteps) {
@@ -88,6 +112,7 @@ class AgentController private constructor(private val app: BuddyApplication) {
 
             addLog("Think: ${response.think}")
             addLog("Action: ${response.actionType}")
+            _currentThink.value = response.think.ifBlank { response.actionType }
             history.add(mapOf("role" to "assistant", "content" to response.rawJson))
             _status.value = AgentStatus.Executing(goal, step, maxSteps, response.actionType)
 
@@ -105,7 +130,7 @@ class AgentController private constructor(private val app: BuddyApplication) {
 
             history.add(mapOf("role" to "user", "content" to "Action result: $resultText. Continue working towards the goal."))
 
-            delay(800)
+            delay(400)
         }
 
         _status.value = AgentStatus.Done(false, "Reached maximum steps ($maxSteps)")

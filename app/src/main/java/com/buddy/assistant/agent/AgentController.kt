@@ -61,22 +61,13 @@ class AgentController private constructor(private val app: BuddyApplication) {
     }
 
     private fun showOverlay() {
-        // Skip the floating overlay while Buddy's own UI is in the foreground —
-        // the main screen already shows the current state natively, and the pill
-        // would cover the Cancel / Stop task CTA at the bottom.
-        if (isAppInForeground()) return
+        // Overlay must appear for every agent run so the user can see state
+        // and stop the task after Omni navigates away to another app.
         try {
             app.startForegroundService(Intent(app, BuddyOverlayService::class.java).apply {
                 action = BuddyOverlayService.ACTION_SHOW
             })
         } catch (_: Exception) {}
-    }
-
-    private fun isAppInForeground(): Boolean = try {
-        val am = app.getSystemService(android.app.ActivityManager::class.java)
-        am.appTasks.any { it.taskInfo?.topActivity?.packageName == app.packageName }
-    } catch (_: Exception) {
-        false
     }
 
     fun reset() {

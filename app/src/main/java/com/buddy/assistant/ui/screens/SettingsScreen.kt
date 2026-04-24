@@ -1,5 +1,10 @@
 package com.buddy.assistant.ui.screens
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,6 +16,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -25,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -32,7 +39,11 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.buddy.assistant.BuddyApplication
+import com.buddy.assistant.service.BuddyAccessibilityService
 import com.buddy.assistant.ui.theme.BuddyColors
 import com.buddy.assistant.ui.theme.BuddyGradients
 import com.buddy.assistant.ui.theme.BuddyShapes
@@ -55,6 +66,24 @@ fun SettingsScreen(onBack: () -> Unit) {
     val app = context.applicationContext as BuddyApplication
     val repo = app.settingsRepository
     val scope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // Re-check permission state each time the user comes back from the
+    // system settings screens so the status indicators update.
+    var permTick by remember { mutableIntStateOf(0) }
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) permTick++
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+    val accessibilityGranted = remember(permTick) { BuddyAccessibilityService.instance != null }
+    val micGranted = remember(permTick) {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+    val overlayGranted = remember(permTick) { Settings.canDrawOverlays(context) }
 
     var claudeKey by remember { mutableStateOf("") }
     var openrouterKey by remember { mutableStateOf("") }
@@ -119,6 +148,50 @@ fun SettingsScreen(onBack: () -> Unit) {
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Light,
             )
+
+            // ─── Permissions ─────────────────────────────────────────────────
+            SectionLabel("PERMISSIONS")
+            SettingsCard {
+                PermissionRow(
+                    title = "Accessibility",
+                    subtitle = "Read the screen, tap buttons.",
+                    granted = accessibilityGranted,
+                    onClick = {
+                        context.startActivity(
+                            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    },
+                )
+                Divider()
+                PermissionRow(
+                    title = "Microphone",
+                    subtitle = "Hear \u201CHey Omni\u201D anytime.",
+                    granted = micGranted,
+                    onClick = {
+                        context.startActivity(
+                            Intent(
+                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.parse("package:${context.packageName}")
+                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    },
+                )
+                Divider()
+                PermissionRow(
+                    title = "Overlay",
+                    subtitle = "Show status over other apps.",
+                    granted = overlayGranted,
+                    onClick = {
+                        context.startActivity(
+                            Intent(
+                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                Uri.parse("package:${context.packageName}")
+                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    },
+                )
+            }
 
             // ─── LLM Provider ────────────────────────────────────────────────
             SectionLabel("LLM PROVIDER")
@@ -481,6 +554,69 @@ private fun TextInputRow(
             cursorBrush = SolidColor(BuddyColors.Accent),
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun PermissionRow(
+    title: String,
+    subtitle: String,
+    granted: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = BuddyColors.Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(2.dp))
+            Text(subtitle, color = BuddyColors.InkMute, fontSize = 12.sp, fontWeight = FontWeight.Light)
+        }
+        Spacer(Modifier.width(12.dp))
+        PermissionStatus(granted = granted)
+        Spacer(Modifier.width(8.dp))
+        Icon(
+            Icons.Default.ChevronRight,
+            contentDescription = null,
+            tint = BuddyColors.InkMute,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+@Composable
+private fun PermissionStatus(granted: Boolean) {
+    if (granted) {
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(CircleShape)
+                .background(BuddyColors.Success),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Default.Check,
+                contentDescription = "Granted",
+                tint = BuddyColors.Ink,
+                modifier = Modifier.size(14.dp),
+            )
+        }
+    } else {
+        Text(
+            "Grant",
+            color = BuddyColors.Accent,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.3.sp,
+            modifier = Modifier
+                .clip(BuddyShapes.Pill)
+                .border(1.dp, BuddyColors.Accent.copy(alpha = 0.5f), BuddyShapes.Pill)
+                .padding(horizontal = 10.dp, vertical = 5.dp),
         )
     }
 }

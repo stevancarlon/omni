@@ -15,6 +15,12 @@ import android.widget.FrameLayout
 import androidx.core.app.NotificationCompat
 import com.buddy.assistant.R
 import com.buddy.assistant.ui.MainActivity
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -36,9 +42,11 @@ import com.buddy.assistant.ui.theme.BuddyColors
 import com.buddy.assistant.ui.theme.BuddyGradients
 import com.buddy.assistant.ui.theme.BuddyShapes
 import com.buddy.assistant.ui.theme.dockPillStyle
+import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
@@ -48,6 +56,9 @@ import com.buddy.assistant.BuddyApplication
 import com.buddy.assistant.agent.AgentController
 import com.buddy.assistant.data.AgentStatus
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 class BuddyOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
 
@@ -59,8 +70,30 @@ class BuddyOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
 
     private var windowManager: WindowManager? = null
     private var overlayView: ComposeView? = null
+    private var isRequested = false
+    private var removeJob: Job? = null
     private lateinit var agentController: AgentController
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
+    // Drives the slide+fade in Compose. We mount the view, then flip this flag
+    // to true on the next frame so AnimatedVisibility actually animates in.
+    private val _visible = MutableStateFlow(false)
+    private val visible: StateFlow<Boolean> = _visible.asStateFlow()
+
+    // Only mount the overlay view when the whole app is in the background.
+    // While the user is inside Omni's own UI, the main screen already reflects
+    // the agent state natively, so the floating pill would just get in the way.
+    private val foregroundObserver = object : DefaultLifecycleObserver {
+        override fun onStart(owner: LifecycleOwner) {
+            // App went foreground — hide the overlay view (keep service alive).
+            removeOverlayView()
+        }
+
+        override fun onStop(owner: LifecycleOwner) {
+            // App went background — show the overlay if a task is in flight.
+            if (isRequested) addOverlayView()
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -68,13 +101,21 @@ class BuddyOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         agentController = AgentController.getInstance(application as BuddyApplication)
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        ProcessLifecycleOwner.get().lifecycle.addObserver(foregroundObserver)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_SHOW -> {
                 startAsForeground()
-                showOverlay()
+                isRequested = true
+                // Only attach the view right now if the app is backgrounded;
+                // otherwise we'll attach from the lifecycle observer once it is.
+                val state = ProcessLifecycleOwner.get().lifecycle.currentState
+                if (!state.isAtLeast(Lifecycle.State.STARTED)) {
+                    addOverlayView()
+                }
+                observeTaskCompletion()
             }
             ACTION_HIDE -> hideOverlay()
         }
@@ -116,14 +157,30 @@ class BuddyOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        hideOverlay()
+        // We're being torn down — no animation is going to finish. Just drop
+        // the view synchronously and clean up.
+        overlayView?.let {
+            try { windowManager?.removeView(it) } catch (_: Exception) {}
+        }
+        overlayView = null
+        removeJob?.cancel()
+        removeJob = null
+        ProcessLifecycleOwner.get().lifecycle.removeObserver(foregroundObserver)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         scope.cancel()
         super.onDestroy()
     }
 
-    private fun showOverlay() {
-        if (overlayView != null) return
+    private fun addOverlayView() {
+        // Cancel any pending remove: user re-backgrounded before the exit
+        // animation finished, so reuse the existing view and animate back in.
+        removeJob?.cancel()
+        removeJob = null
+
+        if (overlayView != null) {
+            _visible.value = true
+            return
+        }
         if (!android.provider.Settings.canDrawOverlays(this)) {
             Log.w("BuddyOverlay", "Overlay permission not granted, skipping")
             return
@@ -141,21 +198,61 @@ class BuddyOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
             y = 80
         }
 
+        _visible.value = false
         val composeView = ComposeView(this).apply {
             setViewTreeLifecycleOwner(this@BuddyOverlayService)
             setViewTreeSavedStateRegistryOwner(this@BuddyOverlayService)
             setContent {
-                OverlayContent(agentController) {
+                OverlayContent(agentController, visible) {
                     hideOverlay()
                 }
             }
         }
 
-        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        if (lifecycleRegistry.currentState != Lifecycle.State.RESUMED) {
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        }
         windowManager?.addView(composeView, params)
         overlayView = composeView
 
-        // Auto-hide when task completes
+        // Flip to visible on the next frame so AnimatedVisibility sees the
+        // transition from false → true and runs the enter animation.
+        scope.launch {
+            delay(16)
+            _visible.value = true
+        }
+    }
+
+    private fun removeOverlayView(thenStop: Boolean = false) {
+        val view = overlayView
+        if (view == null) {
+            if (thenStop) stopForegroundAndSelf()
+            return
+        }
+        if (removeJob?.isActive == true) {
+            // An exit is already in flight. If we now want to stop after, just
+            // chain that onto the existing job.
+            if (thenStop) {
+                val existing = removeJob
+                removeJob = scope.launch {
+                    existing?.join()
+                    stopForegroundAndSelf()
+                }
+            }
+            return
+        }
+        _visible.value = false
+        removeJob = scope.launch {
+            // Must outlast the exit animation in OverlayContent (~220ms).
+            delay(OVERLAY_EXIT_DURATION_MS + 40L)
+            try { windowManager?.removeView(view) } catch (_: Exception) {}
+            if (overlayView === view) overlayView = null
+            removeJob = null
+            if (thenStop) stopForegroundAndSelf()
+        }
+    }
+
+    private fun observeTaskCompletion() {
         scope.launch {
             agentController.status.collect { status ->
                 if (status is AgentStatus.Done || status is AgentStatus.Error) {
@@ -167,26 +264,52 @@ class BuddyOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
     }
 
     private fun hideOverlay() {
-        overlayView?.let {
-            try { windowManager?.removeView(it) } catch (_: Exception) {}
-        }
-        overlayView = null
-        stopForegroundAndSelf()
+        isRequested = false
+        // Play the exit animation, then tear down. stopForegroundAndSelf runs
+        // onDestroy which cancels the scope, so we must defer it until after
+        // the animation frame has rendered.
+        removeOverlayView(thenStop = true)
     }
 
     companion object {
         const val ACTION_SHOW = "com.buddy.OVERLAY_SHOW"
         const val ACTION_HIDE = "com.buddy.OVERLAY_HIDE"
         private const val NOTIFICATION_ID = 4242
+        private const val OVERLAY_ENTER_DURATION_MS = 280
+        private const val OVERLAY_EXIT_DURATION_MS = 220
     }
 }
 
 @Composable
 private fun OverlayContent(
     agentController: AgentController,
+    visibleFlow: StateFlow<Boolean>,
     onDismiss: () -> Unit
 ) {
     val status by agentController.status.collectAsState()
+    val visible by visibleFlow.collectAsState()
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInVertically(
+            animationSpec = tween(durationMillis = 280),
+            initialOffsetY = { it },
+        ) + fadeIn(animationSpec = tween(durationMillis = 220)),
+        exit = slideOutVertically(
+            animationSpec = tween(durationMillis = 220),
+            targetOffsetY = { it },
+        ) + fadeOut(animationSpec = tween(durationMillis = 180)),
+    ) {
+    OverlayPill(status, agentController, onDismiss)
+    }
+}
+
+@Composable
+private fun OverlayPill(
+    status: AgentStatus,
+    agentController: AgentController,
+    onDismiss: () -> Unit,
+) {
 
     val statusText = when (status) {
         is AgentStatus.VoiceListening -> "Listening\u2026"

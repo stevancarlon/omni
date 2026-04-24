@@ -1,0 +1,377 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #0A0A0C;
+    --bg2: #15171E;
+    --border: #1E2230;
+    --text: #E9ECF2;
+    --dim: #A7ADBC;
+    --accent: #5B8CFF;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: -apple-system, Inter, sans-serif; font-size: 12px; }
+  body { display: flex; flex-direction: column; height: 100vh; }
+  .stage { flex: 1; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 40%, #0E1220, #030306); }
+  canvas { display: block; image-rendering: pixelated; }
+  .panel { padding: 10px 12px; border-top: 1px solid var(--border); background: var(--bg2); }
+  .row { display: flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+  button { background: #1E2230; color: var(--text); border: 1px solid #2B3044; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-size: 11px; font-weight: 500; }
+  button:hover { background: #262B3B; }
+  button.active { background: var(--accent); border-color: var(--accent); color: white; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: white; }
+  label { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 11px; }
+  input[type="range"] { flex: 1; }
+  .log { height: 46px; overflow-y: auto; background: #07080C; border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font-family: ui-monospace, monospace; font-size: 10px; color: var(--dim); }
+  .stat { color: var(--dim); font-size: 10px; }
+</style>
+</head>
+<body>
+  <div class="stage"><canvas id="c" width="320" height="320" style="width:320px;height:320px;"></canvas></div>
+  <div class="panel">
+    <div class="row" id="states"></div>
+    <div class="row">
+      <label>amp <input id="amp" type="range" min="0" max="2" step="0.01" value="1" /></label>
+      <label>size
+        <select id="size">
+          <option>256</option>
+          <option selected>512</option>
+          <option>768</option>
+          <option>1024</option>
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <button id="bake" class="primary">Bake current</button>
+      <button id="bakeAll">Bake all 8</button>
+      <button id="applyAll">Propagate to all orbs</button>
+      <span class="stat" id="stat"></span>
+    </div>
+    <div class="log" id="log"></div>
+  </div>
+
+<script>
+const STATES = ['Idle','Listening','Thinking','Speaking','Executing','Success','Error','Muted'];
+let state = 0;
+let amp = 1.0;
+
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: true });
+const log = (m) => { const l = document.getElementById('log'); l.textContent = m + '\n' + l.textContent; parent.postMessage({pluginMessage:{type:'log', text:m}}, '*'); };
+
+if (!gl) { log('WebGL2 not supported'); throw new Error('no webgl2'); }
+
+const VS = `#version 300 es
+in vec2 a; out vec2 v;
+void main(){ v = a*0.5+0.5; gl_Position = vec4(a,0,1); }`;
+
+const FS = `#version 300 es
+precision highp float;
+in vec2 v;
+out vec4 fragColor;
+uniform float uTime;
+uniform int   uState;
+uniform float uAmp;
+uniform vec2  uRes;
+
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f*f*(3.0-2.0*f);
+  return mix(mix(hash(i+vec2(0,0)), hash(i+vec2(1,0)), u.x),
+             mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), u.x), u.y);
+}
+float fbm2(vec2 p){ float v=0.0,a=0.5; for(int i=0;i<2;i++){v+=a*noise(p);p*=2.03;a*=0.5;} return v; }
+float fbm3(vec2 p){ float v=0.0,a=0.5; for(int i=0;i<3;i++){v+=a*noise(p);p*=2.03;a*=0.5;} return v; }
+
+vec4 stateParams(int s, float t){
+  float speed = 1.0, ampO = 1.0, hue = 0.0, sat = 1.0;
+  if (s == 0){ speed = 0.55; ampO = 0.88 + 0.12*sin(t*1.05); }
+  else if (s == 1){ speed = 1.35; ampO = 1.15 + 0.25*abs(sin(t*5.5)); hue = -0.10; }
+  else if (s == 2){ speed = 1.00; ampO = 0.95; hue = 0.04; }
+  else if (s == 3){ speed = 1.20; ampO = 1.00 + 0.20*sin(t*8.0); hue = -0.04; }
+  else if (s == 4){ speed = 0.85; ampO = 0.85; hue = 0.42; sat = 0.95; }
+  else if (s == 5){ speed = 1.10; ampO = 0.90 + 0.20*smoothstep(0.0, 0.6, sin(t*0.8)); hue = -0.10; sat = 0.80; }
+  else if (s == 6){ speed = 0.70; ampO = 0.70; hue = 0.33; sat = 1.00; }
+  else if (s == 7){ speed = 0.30; ampO = 0.55; hue = 0.00; sat = 0.15; }
+  return vec4(speed, ampO, hue, sat);
+}
+
+vec3 hueRotate(vec3 c, float h){
+  const mat3 toYIQ = mat3(0.299, 0.587, 0.114,  0.596,-0.274,-0.322,  0.211,-0.523, 0.312);
+  const mat3 toRGB = mat3(1.0, 0.956, 0.621,   1.0,-0.272,-0.647,   1.0,-1.106, 1.703);
+  vec3 yiq = toYIQ * c;
+  float a = h * 6.2831853;
+  float ca = cos(a), sa = sin(a);
+  yiq.yz = mat2(ca, -sa, sa, ca) * yiq.yz;
+  return toRGB * yiq;
+}
+
+const int STAR_COUNT = 320;
+
+vec3 starWarp(vec2 p, float t, float ampI){
+  vec3 acc = vec3(0.0);
+  float globalSpeed = 0.085;
+  for (int i = 0; i < STAR_COUNT; i++){
+    float fi = float(i);
+    float s1 = hash(vec2(fi,  1.73));
+    float s2 = hash(vec2(fi,  4.21));
+    float s3 = hash(vec2(fi,  7.57));
+    float s4 = hash(vec2(fi,  9.11));
+    float s5 = hash(vec2(fi, 11.37));
+    float s6 = hash(vec2(fi, 23.11));
+    float s3b= hash(vec2(fi, 19.47));
+    float tierSeed = hash(vec2(fi, 31.7));
+    float travelDir = (s5 < 0.40) ? -1.0 : 1.0;
+    float vanishRot = -t * 0.06;
+    float ang = fi * 2.39996323 + (s1 - 0.5) * 0.40 + vanishRot;
+    float speedJitter = mix(0.08, 1.6, pow(s3, 1.6)) * mix(0.55, 1.3, s3b);
+    float speed = globalSpeed * speedJitter;
+    float age = fract(s2 + t * speed);
+    float closeness = (travelDir > 0.0) ? age : (1.0 - age);
+    float maxR = mix(0.15, 1.45, pow(s6, 3.5));
+    float r = pow(closeness, 1.7) * maxR;
+    vec2 dir = vec2(cos(ang), sin(ang));
+    vec2 pos = dir * r;
+    if (r > 1.6) continue;
+    float sizeFactor = 0.75, brightFactor = 1.40;
+    if (tierSeed >= 0.5 && tierSeed < 0.8333){ sizeFactor = 2.00; brightFactor = 2.30; }
+    else if (tierSeed >= 0.8333){ sizeFactor = 4.50; brightFactor = 3.60; }
+    float distanceFactor = maxR / 1.45;
+    float brightDF = mix(0.55, 1.0, distanceFactor);
+    float baseSize = mix(0.0020, 0.040, pow(closeness, 2.2)) * sizeFactor * distanceFactor;
+    float brightness = pow(closeness, 2.0) * brightFactor * brightDF * ampI;
+    float birthFade = smoothstep(0.02, 0.18, age);
+    float deathFade = 1.0 - smoothstep(0.85, 1.00, age);
+    brightness *= birthFade * deathFade;
+    vec2 d = p - pos;
+    float dd = dot(d, d);
+    float influenceR2 = baseSize * baseSize * 18.0;
+    if (dd > influenceR2 && closeness < 0.72) continue;
+    float head     = exp(-dd / (baseSize*baseSize * 1.35 + 1e-6));
+    float headMid  = exp(-dd / (baseSize*baseSize * 0.85 + 1e-6));
+    float headCore = exp(-dd / (baseSize*baseSize * 0.30 + 1e-6));
+    float along = dot(d, dir);
+    float perp  = dot(d, vec2(-dir.y, dir.x));
+    float effAlong = along * travelDir;
+    float streakLen = mix(0.0, 0.22, pow(closeness, 1.5)) * mix(0.6, 1.3, s4);
+    float streakW   = baseSize * 0.48;
+    float streak = 0.0;
+    if (effAlong < 0.0 && streakLen > 0.0){
+      streak = exp(effAlong / streakLen) * exp(-(perp*perp) / (streakW*streakW + 1e-6));
+    }
+    float halo = exp(-dd / (baseSize*baseSize * 14.0 + 1e-6)) * pow(closeness, 2.0) * 0.30;
+    vec3 colFringe = vec3(0.38, 0.66, 1.00);
+    vec3 colCore   = mix(vec3(0.80, 0.92, 1.00), vec3(0.97, 0.99, 1.00), closeness);
+    vec3 colMid    = mix(colFringe, colCore, 0.55);
+    vec3 colStreak = vec3(0.48, 0.78, 1.00);
+    vec3 colHalo   = vec3(0.32, 0.62, 1.00);
+    acc += colFringe * head     * brightness * 0.85;
+    acc += colMid    * headMid  * brightness * 1.15;
+    acc += colCore   * headCore * brightness * 1.30;
+    acc += colStreak * streak   * brightness * 0.75;
+    acc += colHalo   * halo     * brightness;
+    float rimRadius = length(p);
+    float rimProximity = smoothstep(0.62, 0.96, rimRadius) * (1.0 - smoothstep(0.98, 1.10, rimRadius));
+    if (rimProximity > 0.0 && travelDir > 0.0){
+      vec2 np = (rimRadius > 1e-4) ? p / rimRadius : vec2(0.0);
+      float angCos = max(0.0, dot(np, dir));
+      float arc = pow(angCos, 22.0);
+      float atRim = smoothstep(0.55, 0.96, closeness);
+      float splash = rimProximity * arc * atRim * brightness;
+      vec3 rimTintWide   = mix(vec3(0.55, 0.82, 1.00), vec3(0.92, 0.98, 1.00), closeness);
+      vec3 rimTintBright = mix(vec3(0.70, 0.88, 1.00), vec3(0.96, 0.99, 1.00), closeness);
+      acc += rimTintWide   * splash * 1.1;
+      acc += rimTintBright * pow(arc, 2.0) * rimProximity * atRim * brightness * 1.3;
+    }
+  }
+  return acc;
+}
+
+void main(){
+  vec2 p = v*2.0 - 1.0;
+  vec4 sp4 = stateParams(uState, uTime);
+  float tSpeed = sp4.x, ampS = sp4.y * uAmp, hue = sp4.z, sat = sp4.w;
+  float t = uTime * tSpeed;
+
+  vec3 cBg    = vec3(0.020, 0.027, 0.055);
+  vec3 cDeep  = vec3(0.055, 0.110, 0.227);
+  vec3 cMid   = vec3(0.184, 0.373, 0.721);
+  vec3 cRim   = vec3(0.498, 0.753, 1.000);
+
+  float sR = 0.60;
+  float dist = length(p);
+  float sMask = smoothstep(sR+0.003, sR-0.003, dist);
+  vec2 sp = p / sR;
+  float sd = length(sp);
+  float sz = sqrt(max(0.0, 1.0 - sd*sd));
+  vec3 N = vec3(sp, sz);
+
+  vec2 nwp = sp * 1.6;
+  vec2 flow1 = vec2(fbm2(nwp + vec2(0.0,  t*0.05)) - 0.5,
+                    fbm2(nwp + vec2(7.3, -t*0.04)) - 0.5);
+  vec2 flow2 = vec2(fbm2(nwp*1.7 + flow1 + vec2( 3.1,  t*0.035)) - 0.5,
+                    fbm2(nwp*1.7 + flow1 + vec2(-2.7, -t*0.030)) - 0.5);
+  vec2 nwarp = (flow1 + 0.35 * flow2) * 0.45;
+  float edgeW = pow(1.0 - sz, 1.5);
+  float distortAmp = mix(0.05, 0.85, edgeW);
+  vec3 Nlq = normalize(N + vec3(nwarp * distortAmp, 0.0));
+
+  vec3 viewDir = vec3(0.0, 0.0, -1.0);
+  vec3 Rr = refract(viewDir, Nlq, 1.0/1.52);
+  float backDepth = 1.15;
+  vec2 spRaw = sp + Rr.xy * (backDepth / max(-Rr.z, 0.18));
+  float lens = 1.0 - pow(sd, 2.4) * 0.55;
+  vec2 spC = spRaw * 0.78 * lens;
+  float rC = length(spC);
+
+  vec3 interior = cDeep * 1.25;
+  interior += mix(cDeep, cMid, 0.5) * (1.0 - smoothstep(0.0, 1.05, rC)) * 0.35;
+  interior += starWarp(spC, t, ampS);
+  interior *= mix(0.65, 1.0, pow(sz, 0.55));
+
+  float rimBand = smoothstep(0.88, 1.0, sd);
+  interior *= 1.0 - rimBand * 0.45;
+
+  float fres = pow(1.0 - sz, 3.0);
+  float bInt = dot(interior, vec3(0.33));
+  interior += cRim * fres * (0.15 + bInt*0.4);
+
+  vec3 Lshade = normalize(vec3(0.35, -0.55, 0.4));
+  float shade = pow(max(0.0, dot(N, Lshade)), 2.0);
+  interior *= mix(1.0, 0.82, shade * 0.45);
+
+  float sparkle = 0.0;
+  for (int i = 0; i < 3; i++){
+    float fi = float(i);
+    vec2 cell = sp * (5.0 + fi*3.0);
+    vec2 ci = floor(cell);
+    vec2 cf = fract(cell) - 0.5;
+    float h = hash(ci + fi*37.0);
+    if (h > 0.94){
+      vec2 off = vec2(hash(ci+vec2(1.0,0.0))-0.5, hash(ci+vec2(0.0,1.0))-0.5) * 0.6;
+      float d = length(cf - off);
+      float tw = 0.5 + 0.5 * sin(t*(1.5 + h*3.0) + h*20.0);
+      sparkle += exp(-d*d * 900.0) * tw;
+    }
+  }
+  interior += vec3(1.0) * sparkle * smoothstep(0.1, 0.55, sz) * 0.9;
+
+  interior = hueRotate(interior, hue);
+  float luma = dot(interior, vec3(0.2126, 0.7152, 0.0722));
+  interior = mix(vec3(luma), interior, sat);
+
+  vec3 color = interior * sMask;
+  fragColor = vec4(color, sMask);
+}`;
+
+function sh(t, s){ const x=gl.createShader(t); gl.shaderSource(x,s); gl.compileShader(x); if(!gl.getShaderParameter(x,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(x)); return x; }
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { log('link err: ' + gl.getProgramInfoLog(prog)); throw 0; }
+gl.useProgram(prog);
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+const aLoc = gl.getAttribLocation(prog, 'a');
+gl.enableVertexAttribArray(aLoc);
+gl.vertexAttribPointer(aLoc, 2, gl.FLOAT, false, 0, 0);
+const uTime = gl.getUniformLocation(prog, 'uTime');
+const uState = gl.getUniformLocation(prog, 'uState');
+const uAmp  = gl.getUniformLocation(prog, 'uAmp');
+const uRes  = gl.getUniformLocation(prog, 'uRes');
+
+function renderFrame(size, timeSec){
+  if (canvas.width !== size){ canvas.width = size; canvas.height = size; canvas.style.width = '320px'; canvas.style.height = '320px'; }
+  gl.viewport(0,0,size,size);
+  gl.uniform1f(uTime, timeSec);
+  gl.uniform1i(uState, state);
+  gl.uniform1f(uAmp, amp);
+  gl.uniform2f(uRes, size, size);
+  gl.clearColor(0,0,0,0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+let tStart = performance.now();
+function live(){
+  const t = (performance.now() - tStart) / 1000;
+  renderFrame(320, t);
+  requestAnimationFrame(live);
+}
+live();
+
+// ── bake: render at target size, return PNG bytes ──
+async function bakeOnce({ size = 512, state: st = 0, amp: a = 1.0, time = performance.now()/1000 } = {}){
+  const prevState = state, prevAmp = amp;
+  state = st; amp = a;
+  renderFrame(size, time);
+  const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+  const buffer = await blob.arrayBuffer();
+  state = prevState; amp = prevAmp;
+  canvas.width = 320; canvas.height = 320;
+  return new Uint8Array(buffer);
+}
+
+// ── UI controls ──
+const statesRow = document.getElementById('states');
+STATES.forEach((s, i) => {
+  const b = document.createElement('button');
+  b.textContent = s;
+  if (i === state) b.classList.add('active');
+  b.onclick = () => { state = i; [...statesRow.children].forEach((c, j) => c.classList.toggle('active', j === i)); };
+  statesRow.appendChild(b);
+});
+document.getElementById('amp').oninput = (e) => { amp = parseFloat(e.target.value); };
+const sizeSel = document.getElementById('size');
+
+document.getElementById('bake').onclick = async () => {
+  const size = parseInt(sizeSel.value, 10);
+  const bytes = await bakeOnce({ size, state, amp });
+  document.getElementById('stat').textContent = `baked ${STATES[state]} @ ${size}px (${bytes.length} bytes)`;
+  parent.postMessage({ pluginMessage: { type: 'rendered', bytes: Array.from(bytes) } }, '*');
+};
+document.getElementById('bakeAll').onclick = async () => {
+  const size = parseInt(sizeSel.value, 10);
+  for (let i = 0; i < STATES.length; i++){
+    const bytes = await bakeOnce({ size, state: i, amp, time: i * 0.37 });
+    document.getElementById('stat').textContent = `baking ${i+1}/8 ${STATES[i]} (${bytes.length} bytes)`;
+    parent.postMessage({ pluginMessage: { type: 'rendered', bytes: Array.from(bytes), state: i, index: i } }, '*');
+    await new Promise(r => setTimeout(r, 120));
+  }
+  document.getElementById('stat').textContent = 'bake all · done';
+};
+document.getElementById('applyAll').onclick = () => {
+  // Re-bake current state and let code.js propagate-to-all-orbs
+  parent.postMessage({ pluginMessage: { type: 'request-apply-all' } }, '*');
+  document.getElementById('bake').click();
+};
+
+// ── commands from code.js (driven by Claude's bridge) ──
+window.addEventListener('message', async (ev) => {
+  const m = ev.data.pluginMessage;
+  if (!m) return;
+  if (m.type === 'render'){
+    state = m.state ?? 0; amp = m.amp ?? 1.0;
+    [...statesRow.children].forEach((c, j) => c.classList.toggle('active', j === state));
+    const bytes = await bakeOnce({ size: m.size ?? 512, state, amp, time: m.time ?? (performance.now()/1000) });
+    parent.postMessage({ pluginMessage: { type: 'rendered', bytes: Array.from(bytes), id: m.id, state, size: m.size } }, '*');
+  } else if (m.type === 'render-all'){
+    const size = m.size ?? 512;
+    for (let i = 0; i < STATES.length; i++){
+      const bytes = await bakeOnce({ size, state: i, amp, time: i * 0.37 });
+      parent.postMessage({ pluginMessage: { type: 'rendered', bytes: Array.from(bytes), id: m.id, state: i, size, index: i, total: STATES.length } }, '*');
+      await new Promise(r => setTimeout(r, 100));
+    }
+  }
+});
+
+parent.postMessage({ pluginMessage: { type: 'ready' } }, '*');
+log('ready');
+</script>
+</body>
+</html>

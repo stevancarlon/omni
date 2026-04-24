@@ -25,7 +25,7 @@ class SpeechCorrector(appNames: List<String>) {
 
     private val skipWords = setOf(
         "open", "play", "on", "the", "a", "an", "in", "my", "to", "and",
-        "please", "hey", "buddy", "start", "launch", "close", "stop",
+        "please", "hey", "buddy", "omni", "start", "launch", "close", "stop",
         "go", "show", "find", "search", "use", "run", "with", "for"
     )
 

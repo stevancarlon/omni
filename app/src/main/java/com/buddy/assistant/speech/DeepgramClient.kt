@@ -19,7 +19,7 @@ enum class ListenMode { WAKE_WORD, COMMAND }
 class DeepgramClient(
     private val apiKey: String,
     private val language: String = "",
-    private val wakeWord: String = "hey buddy",
+    private val wakeWord: String = "hey omni",
     private val onWakeWordDetected: () -> Unit = {},
     private val onPartialResult: (String) -> Unit = {},
     private val onFinalResult: (String) -> Unit = {},

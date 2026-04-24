@@ -61,11 +61,22 @@ class AgentController private constructor(private val app: BuddyApplication) {
     }
 
     private fun showOverlay() {
+        // Skip the floating overlay while Buddy's own UI is in the foreground —
+        // the main screen already shows the current state natively, and the pill
+        // would cover the Cancel / Stop task CTA at the bottom.
+        if (isAppInForeground()) return
         try {
-            app.startService(Intent(app, BuddyOverlayService::class.java).apply {
+            app.startForegroundService(Intent(app, BuddyOverlayService::class.java).apply {
                 action = BuddyOverlayService.ACTION_SHOW
             })
         } catch (_: Exception) {}
+    }
+
+    private fun isAppInForeground(): Boolean = try {
+        val am = app.getSystemService(android.app.ActivityManager::class.java)
+        am.appTasks.any { it.taskInfo?.topActivity?.packageName == app.packageName }
+    } catch (_: Exception) {
+        false
     }
 
     fun reset() {
@@ -74,13 +85,18 @@ class AgentController private constructor(private val app: BuddyApplication) {
         _status.value = AgentStatus.Idle
     }
 
+    /** Debug-only — force a status for visual QA of orb states. */
+    fun debugSetStatus(status: AgentStatus) {
+        _status.value = status
+    }
+
     // ─── Agent Loop ──────────────────────────────────────────────────────────
 
     private suspend fun runAgentLoop(goal: String, voiceCandidates: List<String> = listOf(goal)) {
         val service = BuddyAccessibilityService.instance
         if (service == null) {
-            fail("Accessibility service not enabled. Please enable Buddy in Accessibility Settings.")
-            speak("Please enable Buddy in Accessibility Settings first.")
+            fail("Accessibility service not enabled. Please enable Omni in Accessibility Settings.")
+            speak("Please enable Omni in Accessibility Settings first.")
             return
         }
 

@@ -1,19 +1,31 @@
 package com.buddy.assistant.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -21,10 +33,22 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.buddy.assistant.BuddyApplication
+import com.buddy.assistant.ui.theme.BuddyColors
+import com.buddy.assistant.ui.theme.BuddyGradients
+import com.buddy.assistant.ui.theme.BuddyShapes
+import com.buddy.assistant.ui.theme.BuddyTextMetrics
+import com.buddy.assistant.ui.theme.OmniToggle
+import com.buddy.assistant.ui.theme.dockPillStyle
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * SettingsScreen — Figma `7 · Settings` (node 47:2).
+ *
+ * Dark gradient background, display-small "Settings" title, accent-colored
+ * section labels, pill-shaped provider chips with iris gradient when selected,
+ * card-styled input rows, and custom iris-gradient toggles.
+ */
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
@@ -33,421 +57,648 @@ fun SettingsScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
 
     var claudeKey by remember { mutableStateOf("") }
-    var openaiKey by remember { mutableStateOf("") }
     var openrouterKey by remember { mutableStateOf("") }
     var groqKey by remember { mutableStateOf("") }
+    var deepgramKey by remember { mutableStateOf("") }
     var provider by remember { mutableStateOf("claude") }
     var model by remember { mutableStateOf("claude-opus-4-6") }
     var wakeWordEnabled by remember { mutableStateOf(true) }
-    var wakeWord by remember { mutableStateOf("Hey Buddy") }
+    var wakeWord by remember { mutableStateOf("Hey Omni") }
     var ttsEnabled by remember { mutableStateOf(true) }
-    var maxSteps by remember { mutableStateOf("30") }
-    var showApiKey by remember { mutableStateOf(false) }
+    var maxSteps by remember { mutableIntStateOf(30) }
+    var showKeys by remember { mutableStateOf(false) }
     var speechProvider by remember { mutableStateOf("builtin") }
-    var deepgramApiKey by remember { mutableStateOf("") }
-    var showDeepgramKey by remember { mutableStateOf(false) }
     var speechLanguage by remember { mutableStateOf("") }
 
-    // Load saved values
     LaunchedEffect(Unit) {
         claudeKey = repo.apiKeyClaude.first().ifBlank { repo.apiKey.first() }
-        openaiKey = repo.apiKeyOpenai.first()
         openrouterKey = repo.apiKeyOpenrouter.first()
         groqKey = repo.apiKeyGroq.first()
-        provider = repo.llmProvider.first()
+        deepgramKey = repo.deepgramApiKey.first()
+        provider = repo.llmProvider.first().takeIf { it in setOf("claude", "openrouter", "groq") } ?: "claude"
         model = repo.llmModel.first()
         wakeWordEnabled = repo.wakeWordEnabled.first()
         wakeWord = repo.wakeWord.first()
         ttsEnabled = repo.ttsEnabled.first()
-        maxSteps = repo.maxSteps.first().toString()
+        maxSteps = repo.maxSteps.first()
         speechProvider = repo.speechProvider.first()
-        deepgramApiKey = repo.deepgramApiKey.first()
         speechLanguage = repo.speechLanguage.first()
     }
-
-    val bgGradient = Brush.verticalGradient(
-        colors = listOf(Color(0xFF0A0A1A), Color(0xFF0D0D2B), Color(0xFF0A0A1A))
-    )
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(bgGradient)
+            .background(BuddyGradients.Background)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.systemBars)
                 .verticalScroll(rememberScrollState())
-                .padding(24.dp)
+                .padding(horizontal = 24.dp)
         ) {
-            Spacer(modifier = Modifier.height(48.dp))
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    "Settings",
-                    style = MaterialTheme.typography.headlineSmall.copy(
-                        color = Color.White,
-                        fontWeight = FontWeight.Light,
-                        letterSpacing = 4.sp
-                    )
-                )
+            Spacer(Modifier.height(8.dp))
+            IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = BuddyColors.Ink)
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Settings",
+                style = MaterialTheme.typography.displaySmall.copy(
+                    brush = BuddyGradients.SilverText,
+                    fontWeight = FontWeight.Light,
+                    fontSize = 40.sp,
+                    letterSpacing = 0.5.sp,
+                ),
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Tune Omni to fit how you work.",
+                color = BuddyColors.InkMute,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Light,
+            )
 
-            SettingsSectionTitle("LLM Provider")
-
-            // Provider selection
-            val providers = listOf("claude", "openai", "groq", "openrouter")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                providers.forEach { p ->
-                    FilterChip(
-                        selected = provider == p,
-                        onClick = {
-                            provider = p
-                            scope.launch { repo.setLlmProvider(p) }
-                            model = when (p) {
-                                "claude" -> "claude-opus-4-6"
-                                "openai" -> "gpt-4o"
-                                "groq" -> "llama-3.3-70b-versatile"
-                                else -> "anthropic/claude-opus-4-6"
-                            }
-                            scope.launch { repo.setLlmModel(model) }
-                        },
-                        label = { Text(p, color = Color.White) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFF6C63FF),
-                            containerColor = Color.White.copy(alpha = 0.1f)
-                        )
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            ApiKeyField("Claude API Key", "sk-ant-...", claudeKey, showApiKey) {
-                claudeKey = it; scope.launch { repo.setApiKeyClaude(it) }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            ApiKeyField("OpenAI API Key", "sk-...", openaiKey, showApiKey) {
-                openaiKey = it; scope.launch { repo.setApiKeyOpenai(it) }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            ApiKeyField("OpenRouter API Key", "sk-or-...", openrouterKey, showApiKey) {
-                openrouterKey = it; scope.launch { repo.setApiKeyOpenrouter(it) }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            ApiKeyField("Groq API Key", "gsk_...", groqKey, showApiKey) {
-                groqKey = it; scope.launch { repo.setApiKeyGroq(it) }
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
+            // ─── LLM Provider ────────────────────────────────────────────────
+            SectionLabel("LLM PROVIDER")
+            val providers = listOf(
+                "claude" to "Claude",
+                "openrouter" to "OpenRouter",
+                "groq" to "Groq",
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                TextButton(onClick = { showApiKey = !showApiKey }) {
-                    Text(
-                        if (showApiKey) "Hide keys" else "Show keys",
-                        color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 12.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Model selection
-            val modelOptions = when (provider) {
-                "claude" -> listOf(
-                    "claude-sonnet-4-6" to "Claude Sonnet 4.6 (fast)",
-                    "claude-opus-4-6" to "Claude Opus 4.6 (smart)",
-                    "claude-haiku-4-5-20251001" to "Claude Haiku 4.5 (fastest)",
-                )
-                "openai" -> listOf(
-                    "gpt-4o" to "GPT-4o",
-                    "gpt-4o-mini" to "GPT-4o Mini (fast)",
-                    "gpt-4.1" to "GPT-4.1",
-                    "gpt-4.1-mini" to "GPT-4.1 Mini (fast)",
-                    "gpt-4.1-nano" to "GPT-4.1 Nano (fastest)",
-                )
-                "groq" -> listOf(
-                    "llama-3.3-70b-versatile" to "Llama 3.3 70B (best)",
-                    "llama-3.1-8b-instant" to "Llama 3.1 8B (fastest)",
-                    "llama-4-scout-17b-16e-instruct" to "Llama 4 Scout",
-                    "mixtral-8x7b-32768" to "Mixtral 8x7B",
-                )
-                "openrouter" -> listOf(
-                    "anthropic/claude-sonnet-4-6" to "Claude Sonnet 4.6",
-                    "anthropic/claude-haiku-4-5-20251001" to "Claude Haiku 4.5",
-                    "openai/gpt-4o-mini" to "GPT-4o Mini",
-                    "meta-llama/llama-3.3-70b-instruct" to "Llama 3.3 70B",
-                    "google/gemini-2.5-flash" to "Gemini 2.5 Flash",
-                )
-                else -> emptyList()
-            }
-
-            var modelMenuExpanded by remember { mutableStateOf(false) }
-            val selectedLabel = modelOptions.firstOrNull { it.first == model }?.second ?: model
-
-            ExposedDropdownMenuBox(
-                expanded = modelMenuExpanded,
-                onExpandedChange = { modelMenuExpanded = it }
-            ) {
-                OutlinedTextField(
-                    value = selectedLabel,
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Model", color = Color.White.copy(alpha = 0.7f)) },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelMenuExpanded) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF6C63FF),
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
-                    ),
-                    modifier = Modifier.fillMaxWidth().menuAnchor()
-                )
-                ExposedDropdownMenu(
-                    expanded = modelMenuExpanded,
-                    onDismissRequest = { modelMenuExpanded = false }
-                ) {
-                    modelOptions.forEach { (id, label) ->
-                        DropdownMenuItem(
-                            text = { Text(label) },
-                            onClick = {
-                                model = id
-                                scope.launch { repo.setLlmModel(id) }
-                                modelMenuExpanded = false
-                            }
-                        )
+                providers.forEach { (id, label) ->
+                    ChipPill(
+                        label = label,
+                        selected = provider == id,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        provider = id
+                        scope.launch { repo.setLlmProvider(id) }
+                        model = defaultModelFor(id)
+                        scope.launch { repo.setLlmModel(model) }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
-            SettingsSectionTitle("Wake Word")
-
+            // ─── API Keys ────────────────────────────────────────────────────
+            SectionLabel("API KEYS")
+            SettingsCard {
+                ApiKeyRow(
+                    label = "Claude",
+                    placeholder = "sk-ant-\u2026",
+                    value = claudeKey,
+                    visible = showKeys,
+                    onChange = { claudeKey = it; scope.launch { repo.setApiKeyClaude(it) } },
+                )
+                Divider()
+                ApiKeyRow(
+                    label = "OpenRouter",
+                    placeholder = "sk-or-\u2026",
+                    value = openrouterKey,
+                    visible = showKeys,
+                    onChange = { openrouterKey = it; scope.launch { repo.setApiKeyOpenrouter(it) } },
+                )
+                Divider()
+                ApiKeyRow(
+                    label = "Groq",
+                    placeholder = "gsk_\u2026",
+                    value = groqKey,
+                    visible = showKeys,
+                    onChange = { groqKey = it; scope.launch { repo.setApiKeyGroq(it) } },
+                )
+            }
+            Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.End,
             ) {
-                Text("Enable Wake Word", color = Color.White)
-                Switch(
+                Text(
+                    if (showKeys) "Hide keys" else "Show keys",
+                    color = BuddyColors.Accent,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clip(BuddyShapes.Pill)
+                        .clickable { showKeys = !showKeys }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            }
+
+            // ─── Model ───────────────────────────────────────────────────────
+            SectionLabel("MODEL")
+            val modelOptions = modelOptionsFor(provider)
+            var modelSheetOpen by remember { mutableStateOf(false) }
+            val currentLabel = modelOptions.firstOrNull { it.first == model }?.second ?: model
+            SelectorCard(
+                title = "Model",
+                value = currentLabel,
+                onClick = { modelSheetOpen = true },
+            )
+            if (modelSheetOpen) {
+                OptionPickerSheet(
+                    title = "Choose Model",
+                    options = modelOptions,
+                    current = model,
+                    onSelect = {
+                        model = it
+                        scope.launch { repo.setLlmModel(it) }
+                        modelSheetOpen = false
+                    },
+                    onDismiss = { modelSheetOpen = false },
+                )
+            }
+
+            // ─── Wake Word ───────────────────────────────────────────────────
+            SectionLabel("WAKE WORD")
+            SettingsCard {
+                ToggleRow(
+                    title = "Enable wake word",
+                    subtitle = "Listen continuously for \"$wakeWord\"",
                     checked = wakeWordEnabled,
-                    onCheckedChange = {
+                    onChange = {
                         wakeWordEnabled = it
                         scope.launch { repo.setWakeWordEnabled(it) }
                     },
-                    colors = SwitchDefaults.colors(checkedTrackColor = Color(0xFF6C63FF))
+                )
+                Divider()
+                TextInputRow(
+                    label = "Phrase",
+                    value = wakeWord,
+                    onChange = {
+                        wakeWord = it
+                        scope.launch { repo.setWakeWord(it) }
+                    },
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            OutlinedTextField(
-                value = wakeWord,
-                onValueChange = { wakeWord = it; scope.launch { repo.setWakeWord(it) } },
-                label = { Text("Wake Word Phrase", color = Color.White.copy(alpha = 0.7f)) },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedBorderColor = Color(0xFF6C63FF),
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
-                ),
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(32.dp))
-            SettingsSectionTitle("Speech Recognition")
-
-            // Provider selection
-            val speechProviders = listOf("builtin" to "Built-in (Android)", "deepgram" to "Deepgram (Streaming)")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                speechProviders.forEach { (id, label) ->
-                    FilterChip(
-                        selected = speechProvider == id,
-                        onClick = {
-                            speechProvider = id
-                            scope.launch { repo.setSpeechProvider(id) }
-                        },
-                        label = { Text(label, color = Color.White, fontSize = 12.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFF6C63FF),
-                            containerColor = Color.White.copy(alpha = 0.1f)
-                        )
+            // ─── Speech Recognition ──────────────────────────────────────────
+            SectionLabel("SPEECH RECOGNITION")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ChipPill(
+                    label = "Built-in",
+                    selected = speechProvider == "builtin",
+                    modifier = Modifier.weight(1f),
+                ) {
+                    speechProvider = "builtin"
+                    scope.launch { repo.setSpeechProvider("builtin") }
+                }
+                ChipPill(
+                    label = "Deepgram",
+                    selected = speechProvider == "deepgram",
+                    modifier = Modifier.weight(1f),
+                ) {
+                    speechProvider = "deepgram"
+                    scope.launch { repo.setSpeechProvider("deepgram") }
+                }
+            }
+            if (speechProvider == "deepgram") {
+                Spacer(Modifier.height(12.dp))
+                SettingsCard {
+                    ApiKeyRow(
+                        label = "Deepgram",
+                        placeholder = "dg-\u2026",
+                        value = deepgramKey,
+                        visible = showKeys,
+                        onChange = { deepgramKey = it; scope.launch { repo.setDeepgramApiKey(it) } },
                     )
                 }
             }
 
-            if (speechProvider == "deepgram") {
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = deepgramApiKey,
-                    onValueChange = { deepgramApiKey = it; scope.launch { repo.setDeepgramApiKey(it) } },
-                    label = { Text("Deepgram API Key", color = Color.White.copy(alpha = 0.7f)) },
-                    placeholder = { Text("dg-...", color = Color.White.copy(alpha = 0.3f)) },
-                    visualTransformation = if (showDeepgramKey) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = { showDeepgramKey = !showDeepgramKey }) {
-                            Icon(
-                                if (showDeepgramKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = null,
-                                tint = Color.White.copy(alpha = 0.7f)
-                            )
-                        }
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF6C63FF),
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            val languages = listOf(
-                "" to "System Default",
-                "en-US" to "English (US)",
-                "en-GB" to "English (UK)",
-                "pt-BR" to "Portuguese (Brazil)",
-                "pt-PT" to "Portuguese (Portugal)",
-                "es-ES" to "Spanish (Spain)",
-                "es-MX" to "Spanish (Mexico)",
-                "fr-FR" to "French",
-                "de-DE" to "German",
-                "it-IT" to "Italian",
-                "ja-JP" to "Japanese",
-                "ko-KR" to "Korean",
-                "zh-CN" to "Chinese (Simplified)",
-                "hi-IN" to "Hindi"
+            Spacer(Modifier.height(12.dp))
+            val languages = languageOptions()
+            val selectedLanguageLabel = languages.firstOrNull { it.first == speechLanguage }?.second
+                ?: "System Default"
+            var languageSheetOpen by remember { mutableStateOf(false) }
+            SelectorCard(
+                title = "Language",
+                value = selectedLanguageLabel,
+                onClick = { languageSheetOpen = true },
             )
-
-            var languageExpanded by remember { mutableStateOf(false) }
-            val selectedLanguageLabel = languages.firstOrNull { it.first == speechLanguage }?.second ?: "System Default"
-
-            ExposedDropdownMenuBox(
-                expanded = languageExpanded,
-                onExpandedChange = { languageExpanded = it }
-            ) {
-                OutlinedTextField(
-                    value = selectedLanguageLabel,
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Language", color = Color.White.copy(alpha = 0.7f)) },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = languageExpanded) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF6C63FF),
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
-                    ),
-                    modifier = Modifier.fillMaxWidth().menuAnchor()
+            if (languageSheetOpen) {
+                OptionPickerSheet(
+                    title = "Recognition Language",
+                    options = languages,
+                    current = speechLanguage,
+                    onSelect = {
+                        speechLanguage = it
+                        scope.launch { repo.setSpeechLanguage(it) }
+                        languageSheetOpen = false
+                    },
+                    onDismiss = { languageSheetOpen = false },
                 )
-                ExposedDropdownMenu(
-                    expanded = languageExpanded,
-                    onDismissRequest = { languageExpanded = false }
-                ) {
-                    languages.forEach { (code, label) ->
-                        DropdownMenuItem(
-                            text = { Text(label) },
-                            onClick = {
-                                speechLanguage = code
-                                scope.launch { repo.setSpeechLanguage(code) }
-                                languageExpanded = false
-                            }
-                        )
-                    }
-                }
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
-            SettingsSectionTitle("Behavior")
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Voice Responses (TTS)", color = Color.White)
-                Switch(
+            // ─── Behavior ────────────────────────────────────────────────────
+            SectionLabel("BEHAVIOR")
+            SettingsCard {
+                ToggleRow(
+                    title = "Voice responses",
+                    subtitle = "Omni speaks results out loud",
                     checked = ttsEnabled,
-                    onCheckedChange = {
+                    onChange = {
                         ttsEnabled = it
                         scope.launch { repo.setTtsEnabled(it) }
                     },
-                    colors = SwitchDefaults.colors(checkedTrackColor = Color(0xFF6C63FF))
+                )
+                Divider()
+                StepperRow(
+                    title = "Max agent steps",
+                    subtitle = "Cap the number of actions per task",
+                    value = maxSteps,
+                    onChange = {
+                        maxSteps = it
+                        scope.launch { repo.setMaxSteps(it) }
+                    },
+                    min = 5,
+                    max = 80,
+                    step = 5,
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            OutlinedTextField(
-                value = maxSteps,
-                onValueChange = {
-                    maxSteps = it
-                    it.toIntOrNull()?.let { v -> scope.launch { repo.setMaxSteps(v) } }
-                },
-                label = { Text("Max Steps", color = Color.White.copy(alpha = 0.7f)) },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedBorderColor = Color(0xFF6C63FF),
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
-                ),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth()
+            Spacer(Modifier.height(36.dp))
+            Text(
+                "Omni v0.1",
+                color = BuddyColors.InkMute,
+                fontSize = 11.sp,
+                letterSpacing = BuddyTextMetrics.CapsTightSp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.align(Alignment.CenterHorizontally),
             )
+            Spacer(Modifier.height(48.dp))
+        }
+    }
+}
 
-            Spacer(modifier = Modifier.height(80.dp))
+// ─── Section label ──────────────────────────────────────────────────────────
+
+@Composable
+private fun SectionLabel(text: String) {
+    Spacer(Modifier.height(28.dp))
+    Text(
+        text,
+        color = BuddyColors.Accent,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = BuddyTextMetrics.CapsTightSp,
+    )
+    Spacer(Modifier.height(12.dp))
+}
+
+// ─── Pill chip ──────────────────────────────────────────────────────────────
+
+@Composable
+private fun ChipPill(
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center,
+    ) {
+        val bgModifier = if (selected) {
+            Modifier.dockPillStyle(BuddyShapes.Pill)
+        } else {
+            Modifier
+                .clip(BuddyShapes.Pill)
+                .background(BuddyColors.Surface.copy(alpha = 0.55f))
+                .border(1.dp, BuddyColors.InkGhost, BuddyShapes.Pill)
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(bgModifier)
+                .clickable { onClick() }
+                .padding(vertical = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                label,
+                color = BuddyColors.Ink,
+                fontSize = 13.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Light,
+                letterSpacing = 0.3.sp,
+            )
+        }
+    }
+}
+
+// ─── Card ───────────────────────────────────────────────────────────────────
+
+@Composable
+private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(BuddyShapes.CardLg)
+            .background(BuddyColors.Surface.copy(alpha = 0.55f))
+            .border(1.dp, BuddyColors.InkGhost, BuddyShapes.CardLg),
+        content = content,
+    )
+}
+
+@Composable
+private fun Divider() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .height(1.dp)
+            .background(BuddyColors.InkGhost),
+    )
+}
+
+// ─── Rows ───────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ApiKeyRow(
+    label: String,
+    placeholder: String,
+    value: String,
+    visible: Boolean,
+    onChange: (String) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+    ) {
+        Text(label, color = BuddyColors.InkMute, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(4.dp))
+        BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            textStyle = TextStyle(
+                color = BuddyColors.Ink,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Light,
+            ),
+            cursorBrush = SolidColor(BuddyColors.Accent),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+            decorationBox = { inner ->
+                if (value.isEmpty()) {
+                    Text(placeholder, color = BuddyColors.InkGhost, fontSize = 14.sp, fontWeight = FontWeight.Light)
+                }
+                inner()
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun TextInputRow(
+    label: String,
+    value: String,
+    onChange: (String) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+    ) {
+        Text(label, color = BuddyColors.InkMute, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(4.dp))
+        BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            textStyle = TextStyle(
+                color = BuddyColors.Ink,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Light,
+            ),
+            cursorBrush = SolidColor(BuddyColors.Accent),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun ToggleRow(
+    title: String,
+    subtitle: String?,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onChange(!checked) }
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = BuddyColors.Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            if (subtitle != null) {
+                Spacer(Modifier.height(2.dp))
+                Text(subtitle, color = BuddyColors.InkMute, fontSize = 12.sp, fontWeight = FontWeight.Light)
+            }
+        }
+        OmniToggle(checked = checked, onChange = onChange)
+    }
+}
+
+@Composable
+private fun StepperRow(
+    title: String,
+    subtitle: String?,
+    value: Int,
+    onChange: (Int) -> Unit,
+    min: Int,
+    max: Int,
+    step: Int,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = BuddyColors.Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            if (subtitle != null) {
+                Spacer(Modifier.height(2.dp))
+                Text(subtitle, color = BuddyColors.InkMute, fontSize = 12.sp, fontWeight = FontWeight.Light)
+            }
+        }
+        StepperButton("\u2212", enabled = value > min) {
+            onChange((value - step).coerceAtLeast(min))
+        }
+        Box(
+            modifier = Modifier
+                .padding(horizontal = 10.dp)
+                .widthIn(min = 28.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("$value", color = BuddyColors.Ink, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+        }
+        StepperButton("+", enabled = value < max) {
+            onChange((value + step).coerceAtMost(max))
         }
     }
 }
 
 @Composable
-private fun ApiKeyField(
-    label: String,
-    placeholder: String,
-    value: String,
-    visible: Boolean,
-    onValueChange: (String) -> Unit
-) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        label = { Text(label, color = Color.White.copy(alpha = 0.7f)) },
-        placeholder = { Text(placeholder, color = Color.White.copy(alpha = 0.3f)) },
-        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedTextColor = Color.White,
-            unfocusedTextColor = Color.White,
-            focusedBorderColor = Color(0xFF6C63FF),
-            unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
-        ),
-        modifier = Modifier.fillMaxWidth(),
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
-    )
+private fun StepperButton(glyph: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(30.dp)
+            .clip(CircleShape)
+            .background(if (enabled) BuddyColors.SurfaceHi else BuddyColors.Surface.copy(alpha = 0.4f))
+            .border(1.dp, BuddyColors.InkGhost, CircleShape)
+            .clickable(enabled = enabled) { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            glyph,
+            color = if (enabled) BuddyColors.Ink else BuddyColors.InkMute,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Medium,
+        )
+    }
 }
 
 @Composable
-private fun SettingsSectionTitle(title: String) {
-    Text(
-        text = title.uppercase(),
-        style = MaterialTheme.typography.labelSmall.copy(
-            color = Color(0xFF6C63FF),
-            letterSpacing = 3.sp,
-            fontWeight = FontWeight.SemiBold
-        )
-    )
-    Spacer(modifier = Modifier.height(12.dp))
+private fun SelectorCard(
+    title: String,
+    value: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(BuddyShapes.CardLg)
+            .background(BuddyColors.Surface.copy(alpha = 0.55f))
+            .border(1.dp, BuddyColors.InkGhost, BuddyShapes.CardLg)
+            .clickable { onClick() }
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = BuddyColors.InkMute, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(2.dp))
+            Text(value, color = BuddyColors.Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        }
+        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = BuddyColors.InkMute)
+    }
 }
+
+// ─── Picker sheet (simple modal via Dialog-like overlay) ────────────────────
+
+@Composable
+private fun OptionPickerSheet(
+    title: String,
+    options: List<Pair<String, String>>,
+    current: String,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(BuddyShapes.CardLg)
+                .background(BuddyColors.Surface)
+                .border(1.dp, BuddyColors.InkGhost, BuddyShapes.CardLg)
+                .padding(20.dp),
+        ) {
+            Text(title, color = BuddyColors.Ink, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(16.dp))
+            options.forEach { (id, label) ->
+                val selected = id == current
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(BuddyShapes.Field)
+                        .background(
+                            if (selected) BuddyColors.SurfaceHi else Color.Transparent
+                        )
+                        .clickable { onSelect(id) }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clip(CircleShape)
+                            .border(
+                                1.5.dp,
+                                if (selected) BuddyColors.Accent else BuddyColors.InkMute,
+                                CircleShape,
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (selected) {
+                            Box(
+                                Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(BuddyColors.Accent),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Text(label, color = BuddyColors.Ink, fontSize = 14.sp, fontWeight = FontWeight.Light)
+                }
+            }
+        }
+    }
+}
+
+// ─── Data helpers ───────────────────────────────────────────────────────────
+
+private fun defaultModelFor(provider: String): String = when (provider) {
+    "claude" -> "claude-opus-4-6"
+    "groq" -> "llama-3.3-70b-versatile"
+    else -> "anthropic/claude-opus-4-6"
+}
+
+private fun modelOptionsFor(provider: String): List<Pair<String, String>> = when (provider) {
+    "claude" -> listOf(
+        "claude-sonnet-4-6" to "Claude Sonnet 4.6 (fast)",
+        "claude-opus-4-6" to "Claude Opus 4.6 (smart)",
+        "claude-haiku-4-5-20251001" to "Claude Haiku 4.5 (fastest)",
+    )
+    "groq" -> listOf(
+        "llama-3.3-70b-versatile" to "Llama 3.3 70B (best)",
+        "llama-3.1-8b-instant" to "Llama 3.1 8B (fastest)",
+        "llama-4-scout-17b-16e-instruct" to "Llama 4 Scout",
+        "mixtral-8x7b-32768" to "Mixtral 8x7B",
+    )
+    "openrouter" -> listOf(
+        "anthropic/claude-sonnet-4-6" to "Claude Sonnet 4.6",
+        "anthropic/claude-haiku-4-5-20251001" to "Claude Haiku 4.5",
+        "meta-llama/llama-3.3-70b-instruct" to "Llama 3.3 70B",
+        "google/gemini-2.5-flash" to "Gemini 2.5 Flash",
+    )
+    else -> emptyList()
+}
+
+private fun languageOptions(): List<Pair<String, String>> = listOf(
+    "" to "System Default",
+    "en-US" to "English (US)",
+    "en-GB" to "English (UK)",
+    "pt-BR" to "Portuguese (Brazil)",
+    "pt-PT" to "Portuguese (Portugal)",
+    "es-ES" to "Spanish (Spain)",
+    "es-MX" to "Spanish (Mexico)",
+    "fr-FR" to "French",
+    "de-DE" to "German",
+    "it-IT" to "Italian",
+    "ja-JP" to "Japanese",
+    "ko-KR" to "Korean",
+    "zh-CN" to "Chinese (Simplified)",
+    "hi-IN" to "Hindi",
+)

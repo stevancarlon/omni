@@ -32,8 +32,10 @@ class SettingsRepository(private val context: Context) {
         val KEY_SPEECH_PROVIDER = stringPreferencesKey("speech_provider")
         val KEY_DEEPGRAM_API_KEY = stringPreferencesKey("deepgram_api_key")
         val KEY_SYSTEM_PROMPT = stringPreferencesKey("system_prompt")
+        val KEY_WELCOME_SEEN = booleanPreferencesKey("welcome_seen")
+        val KEY_CREDITS_BALANCE = intPreferencesKey("credits_balance")
 
-        const val DEFAULT_SYSTEM_PROMPT = """You are Buddy, an AI assistant that controls an Android device on behalf of the user.
+        const val DEFAULT_SYSTEM_PROMPT = """You are Omni, an AI assistant that controls an Android device on behalf of the user.
 You receive the current screen state as a list of UI elements, and you must decide what action to take to accomplish the user's goal.
 
 Always respond with a JSON object in this exact format:
@@ -53,14 +55,14 @@ Actions:
 - press_back: {}
 - press_home: {}
 - press_recents: {}
-- open_app: {"package": "com.example.app", "name": "App Label"}  // ALWAYS copy the exact package from the Installed apps list AND include the label as "name". If unsure of the package, use {"name": "YouTube"} alone and Buddy will resolve it.
+- open_app: {"package": "com.example.app", "name": "App Label"}  // ALWAYS copy the exact package from the Installed apps list AND include the label as "name". If unsure of the package, use {"name": "YouTube"} alone and Omni will resolve it.
 - open_url: {"url": "https://example.com"}
 - wait: {"ms": 2000}
 - done: {"success": true|false, "reason": "explanation"}
 
 The user's goal comes from voice recognition which may mishear app names (e.g. "eye foods" = iFood, "what's up" = WhatsApp, "you tube" = YouTube). Match the user's words against the installed apps list to determine the correct app.
 
-CRITICAL for open_app: NEVER invent a package name. Only use package strings that appear verbatim in the Installed apps list. Always include a "name" param with the app label from the list so Buddy can self-correct if the package is wrong. If a requested app is not in the list, respond with done(success=false, reason="App not installed: ...").
+CRITICAL for open_app: NEVER invent a package name. Only use package strings that appear verbatim in the Installed apps list. Always include a "name" param with the app label from the list so Omni can self-correct if the package is wrong. If a requested app is not in the list, respond with done(success=false, reason="App not installed: ...").
 
 Be precise, methodical, and always verify your actions match the screen state before acting."""
     }
@@ -73,7 +75,7 @@ Be precise, methodical, and always verify your actions match the screen state be
     val llmProvider: Flow<String> = context.dataStore.data.map { it[KEY_LLM_PROVIDER] ?: "claude" }
     val llmModel: Flow<String> = context.dataStore.data.map { it[KEY_LLM_MODEL] ?: "claude-opus-4-6" }
     val wakeWordEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_WAKE_WORD_ENABLED] ?: true }
-    val wakeWord: Flow<String> = context.dataStore.data.map { it[KEY_WAKE_WORD] ?: "Hey Buddy" }
+    val wakeWord: Flow<String> = context.dataStore.data.map { it[KEY_WAKE_WORD] ?: "Hey Omni" }
     val ttsEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_TTS_ENABLED] ?: true }
     val maxSteps: Flow<Int> = context.dataStore.data.map { it[KEY_MAX_STEPS] ?: 30 }
     val speechLanguage: Flow<String> = context.dataStore.data.map { it[KEY_SPEECH_LANGUAGE] ?: "" }
@@ -82,6 +84,8 @@ Be precise, methodical, and always verify your actions match the screen state be
     val systemPrompt: Flow<String> = context.dataStore.data.map {
         it[KEY_SYSTEM_PROMPT] ?: DEFAULT_SYSTEM_PROMPT
     }
+    val welcomeSeen: Flow<Boolean> = context.dataStore.data.map { it[KEY_WELCOME_SEEN] ?: false }
+    val creditsBalance: Flow<Int> = context.dataStore.data.map { it[KEY_CREDITS_BALANCE] ?: 0 }
 
     suspend fun setApiKey(value: String) = context.dataStore.edit { it[KEY_API_KEY] = value }
     suspend fun setApiKeyClaude(value: String) = context.dataStore.edit { it[KEY_API_KEY_CLAUDE] = value }
@@ -108,5 +112,9 @@ Be precise, methodical, and always verify your actions match the screen state be
     suspend fun setSpeechProvider(value: String) = context.dataStore.edit { it[KEY_SPEECH_PROVIDER] = value }
     suspend fun setDeepgramApiKey(value: String) = context.dataStore.edit { it[KEY_DEEPGRAM_API_KEY] = value }
     suspend fun setSystemPrompt(value: String) = context.dataStore.edit { it[KEY_SYSTEM_PROMPT] = value }
+    suspend fun setWelcomeSeen(value: Boolean) = context.dataStore.edit { it[KEY_WELCOME_SEEN] = value }
+    suspend fun addCredits(delta: Int) = context.dataStore.edit {
+        it[KEY_CREDITS_BALANCE] = (it[KEY_CREDITS_BALANCE] ?: 0) + delta
+    }
 
 }

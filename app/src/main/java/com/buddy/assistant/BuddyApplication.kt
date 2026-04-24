@@ -21,19 +21,19 @@ class BuddyApplication : Application() {
 
         val listeningChannel = NotificationChannel(
             CHANNEL_LISTENING,
-            "Buddy Listening",
+            "Omni Listening",
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "Shown when Buddy is actively listening"
+            description = "Shown when Omni is actively listening"
             setShowBadge(false)
         }
 
         val agentChannel = NotificationChannel(
             CHANNEL_AGENT,
-            "Buddy Agent",
+            "Omni Agent",
             NotificationManager.IMPORTANCE_DEFAULT
         ).apply {
-            description = "Shown when Buddy is executing a task"
+            description = "Shown when Omni is executing a task"
         }
 
         manager.createNotificationChannel(listeningChannel)

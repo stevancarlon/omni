@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Buddy Orb — plasma</title>
+<style>
+  * { margin: 0; padding: 0; }
+  body { background: #050508; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2');
+const size = Math.min(window.innerWidth, window.innerHeight) * 0.7;
+canvas.width  = size * devicePixelRatio;
+canvas.height = size * devicePixelRatio;
+canvas.style.width  = size + 'px';
+canvas.style.height = size + 'px';
+
+const vs = `#version 300 es
+in vec2 a_pos;
+out vec2 v_uv;
+void main() { v_uv = a_pos*0.5+0.5; gl_Position = vec4(a_pos,0,1); }`;
+
+const fs = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 fragColor;
+uniform float u_time;
+
+// ─── hash / noise ───
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f*f*(3.0-2.0*f);
+  return mix(mix(hash(i+vec2(0,0)), hash(i+vec2(1,0)), u.x),
+             mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), u.x), u.y);
+}
+float fbm2(vec2 p) {
+  float v = 0.0, a = 0.5;
+  for (int i=0; i<2; i++){ v += a*noise(p); p *= 2.03; a *= 0.5; }
+  return v;
+}
+float fbm3(vec2 p) {
+  float v = 0.0, a = 0.5;
+  for (int i=0; i<3; i++){ v += a*noise(p); p *= 2.03; a *= 0.5; }
+  return v;
+}
+
+// ─── palette (linear space, from analysis) ───
+// #05070E bg, #0E1C3A deep fill, #2F5FB8 mid, #6CB8FF bright cyan,
+// #C8E8FF ray/white, #F4FCFF hot core, #7FC0FF rim edge, #1B3E8A halo tint
+vec3 cBg      = vec3(0.020, 0.027, 0.055);
+vec3 cDeep    = vec3(0.055, 0.110, 0.227);
+vec3 cMid     = vec3(0.184, 0.373, 0.721);
+vec3 cBright  = vec3(0.423, 0.721, 1.000);
+vec3 cRay     = vec3(0.784, 0.910, 1.000);
+vec3 cHot     = vec3(0.957, 0.988, 1.000);
+vec3 cRim     = vec3(0.498, 0.753, 1.000);
+vec3 cHalo    = vec3(0.106, 0.243, 0.541);
+
+// Domain-warped fbm — soft wispy plasma interior
+float wisps(vec2 p, float t) {
+  vec2 q = vec2(fbm2(p + vec2(0.0, t*0.07)),
+                fbm2(p + vec2(5.2, t*0.08 + 1.3)));
+  vec2 r = vec2(fbm2(p + 4.0*q + vec2(1.7, t*0.05)),
+                fbm2(p + 4.0*q + vec2(8.3, t*0.06 + 3.1)));
+  return fbm3(p + 4.0*r);
+}
+
+// Hyperspace starfield: many stars rushing toward the viewer, projected through
+// the orb. Each star travels on a fixed radial direction from center outward;
+// its radius grows non-linearly (perspective). As it gets closer it grows in
+// size/brightness and leaves a short radial streak behind it.
+vec3 starWarp(vec2 p, float t) {
+  vec3 acc = vec3(0.0);
+  const int N = 408;
+  float globalSpeed = 0.085;
+
+  for (int i = 0; i < N; i++) {
+    float fi = float(i);
+    // Per-star random seeds
+    float s1 = hash(vec2(fi, 1.73));   // angle jitter
+    float s2 = hash(vec2(fi, 4.21));   // phase offset
+    float s3 = hash(vec2(fi, 7.57));   // per-star speed variation
+    float s4 = hash(vec2(fi, 9.11));   // per-star size / brightness
+    float s5 = hash(vec2(fi, 11.37));  // direction: forward vs backward
+
+    // ~40% of stars travel BACKWARD (from rim toward center) — as if we were
+    // coasting past them in the other direction; the rest travel FORWARD
+    // (center outward, toward the viewer). This creates a real sense of
+    // motion through a 3D field, not just a uniform warp.
+    float travelDir = (s5 < 0.40) ? -1.0 : 1.0;
+
+    // Slow rotation of the whole vanishing point — gives every star an
+    // angular drift on top of its radial motion, so the field corkscrews
+    // gently rather than flowing in fixed radial lanes.
+    float vanishRot = -t * 0.06;
+    // Stratified angle via the golden-angle increment (2.39996 rad ≈ 137.5°):
+    // this guarantees an even angular spread regardless of N, then a small
+    // hash jitter keeps it from looking mechanical.
+    float angBase = fi * 2.39996323;
+    float ang = angBase + (s1 - 0.5) * 0.40 + vanishRot;
+    // Wide per-star speed distribution — combine two seeds for a long tail:
+    // most stars move at a moderate pace, a handful drift almost stationary,
+    // and a few streak through much faster than the rest.
+    float s3b = hash(vec2(fi, 19.47));
+    float speedJitter = mix(0.08, 1.6, pow(s3, 1.6)) * mix(0.55, 1.3, s3b);
+    float speed = globalSpeed * speedJitter;
+    // Age cycles 0 → 1. 0 = just spawned, 1 = about to expire.
+    float age = fract(s2 + t * speed);
+
+    // Closeness: how near to the viewer is this star?
+    //  - Forward star: closeness grows with age (born far at center, gets close).
+    //  - Backward star: closeness shrinks with age (born close at rim, recedes).
+    float closeness = (travelDir > 0.0) ? age : (1.0 - age);
+
+    // Radial distance from center — perspective expansion.
+    // Per-star maximum-radius seed biases many stars toward short orbits
+    // (never leaving the inner region), so the vanishing point stays densely
+    // populated instead of emptying as stars fly outward.
+    float s6 = hash(vec2(fi, 23.11));
+    // Strong bias toward short orbits so the core stays densely populated —
+    // roughly half the stars never travel past r ≈ 0.35.
+    float maxR = mix(0.15, 1.45, pow(s6, 3.5));
+    float r = pow(closeness, 1.7) * maxR;
+
+    // Star position in refracted sphere-space
+    vec2 dir = vec2(cos(ang), sin(ang));
+    vec2 pos = dir * r;
+
+    if (r > 1.6) continue;
+
+    // 3-2-1 size hierarchy: 3 small : 2 medium : 1 big (≈ 50% / 33% / 17%).
+    // Each star is classified into a discrete tier by a dedicated seed, so the
+    // overall field reads with clear visual hierarchy — lots of tiny specks,
+    // fewer medium points, and a handful of prominent focal stars.
+    float tierSeed = hash(vec2(fi, 31.7));
+    float sizeFactor;
+    float brightFactor;
+    if (tierSeed < 0.5) {
+      // small — 3 parts
+      sizeFactor   = 0.75;
+      brightFactor = 1.40;
+    } else if (tierSeed < 0.8333) {
+      // medium — 2 parts
+      sizeFactor   = 2.00;
+      brightFactor = 2.30;
+    } else {
+      // big — 1 part
+      sizeFactor   = 4.50;
+      brightFactor = 3.60;
+    }
+    // Size scales much more aggressively as the star approaches the rim, so
+    // close stars read as big bright orbs and far ones as tiny specks.
+    // Short-orbit stars (low maxR) are distant background specks — keep them
+    // small/dim so the populated centre reads as many tiny stars, not a blob.
+    // Distance-based scale: short-orbit core stars stay small (natural
+    // perspective — they never approach the viewer), but a floor on
+    // brightness keeps them visible as tiny specks rather than invisible.
+    float distanceFactor = maxR / 1.45;             // 0.10 .. 1.0 (for size)
+    float brightDF       = mix(0.55, 1.0, distanceFactor);  // visible floor
+    float baseSize = mix(0.0020, 0.040, pow(closeness, 2.2)) * sizeFactor * distanceFactor;
+    float brightness = pow(closeness, 2.0) * brightFactor * brightDF;
+
+    // Age-based birth/death fades — identical for both directions so nothing pops.
+    float birthFade = smoothstep(0.02, 0.18, age);
+    float deathFade = 1.0 - smoothstep(0.85, 1.00, age);
+    brightness *= birthFade * deathFade;
+
+    // Head: two-layer — tight white core with a wider bluer fringe, so the
+    // pinpoint reads as a light point with blue falloff rather than a white blob.
+    vec2 d = p - pos;
+    float dd = dot(d, d);
+    // Early-out if this pixel is far outside the star's influence radius.
+    // The widest contribution is the halo (~sqrt(14) × baseSize). Skip work
+    // for pixels beyond that — saves most of the per-star cost.
+    float influenceR2 = baseSize * baseSize * 18.0;
+    if (dd > influenceR2 && closeness < 0.72) continue;
+    // Three-layer falloff: pure-white pinpoint → cyan bright zone (#9FF2FF)
+    // → light-blue edge (#4C8BDC). Gives the star a glowing cyan aura around
+    // the white core instead of a flat white-to-blue ramp.
+    float head     = exp(-dd / (baseSize*baseSize * 1.35 + 1e-6));
+    float headMid  = exp(-dd / (baseSize*baseSize * 0.85 + 1e-6));
+    float headCore = exp(-dd / (baseSize*baseSize * 0.30 + 1e-6));
+
+    // Radial streak trailing the motion direction.
+    float along = dot(d, dir);
+    float perp  = dot(d, vec2(-dir.y, dir.x));
+    // Effective along — negative means "behind the star's motion" regardless
+    // of travel direction. Forward stars streak toward center; backward stars
+    // streak toward the rim.
+    float effAlong = along * travelDir;
+    float streakLen = mix(0.0, 0.22, pow(closeness, 1.5)) * mix(0.6, 1.3, s4);
+    float streakW   = baseSize * 0.48;
+    float streak = 0.0;
+    if (effAlong < 0.0 && streakLen > 0.0) {
+      streak = exp(effAlong / streakLen) *
+               exp(-(perp*perp) / (streakW*streakW + 1e-6));
+    }
+
+    float halo = exp(-dd / (baseSize*baseSize * 14.0 + 1e-6))
+               * pow(closeness, 2.0) * 0.30;
+
+    // Colors (from dense200): saturated blue fringe → near-white core,
+    // blue trails and blue outer halo.
+    vec3 colFringe = vec3(0.38, 0.66, 1.00);                                    // edges — saturated blue
+    vec3 colCore   = mix(vec3(0.80, 0.92, 1.00), vec3(0.97, 0.99, 1.00), closeness); // centre — near white
+    vec3 colMid    = mix(colFringe, colCore, 0.55);                             // bridge layer
+    vec3 colStreak = vec3(0.48, 0.78, 1.00);
+    vec3 colHalo   = vec3(0.32, 0.62, 1.00);
+
+    acc += colFringe * head     * brightness * 0.85;
+    acc += colMid    * headMid  * brightness * 1.15;
+    acc += colCore   * headCore * brightness * 1.30;
+    acc += colStreak * streak   * brightness * 0.75;
+    acc += colHalo   * halo     * brightness;
+
+    // ─── Dynamic rim reflection ───
+    // As a forward-traveling star approaches the edge, the glass rim at that
+    // angle lights up with a bright reflection — broad arc that ramps in well
+    // before impact so the border visibly glows in response to the star.
+    float rimRadius = length(p);
+    float rimProximity = smoothstep(0.62, 0.96, rimRadius)
+                       * (1.0 - smoothstep(0.98, 1.10, rimRadius));
+    if (rimProximity > 0.0 && travelDir > 0.0) {
+      vec2 np = (rimRadius > 1e-4) ? p / rimRadius : vec2(0.0);
+      float angCos = max(0.0, dot(np, dir));
+      float arc = pow(angCos, 22.0);
+      float atRim = smoothstep(0.55, 0.96, closeness);
+      float splash = rimProximity * arc * atRim * brightness;
+      vec3 rimTintWide   = mix(vec3(0.55, 0.82, 1.00), vec3(0.92, 0.98, 1.00), closeness);
+      vec3 rimTintBright = mix(vec3(0.70, 0.88, 1.00), vec3(0.96, 0.99, 1.00), closeness);
+      acc += rimTintWide   * splash * 1.1;
+      acc += rimTintBright * pow(arc, 2.0) * rimProximity * atRim * brightness * 1.3;
+    }
+  }
+
+  return acc;
+}
+
+void main() {
+  vec2 uv = v_uv * 2.0 - 1.0;
+  float dist = length(uv);
+  float t = u_time;
+
+  vec3 color = cBg;
+
+  // ─── Sphere geometry ───
+  float sR = 0.60;
+  float sMask = smoothstep(sR+0.003, sR-0.003, dist);
+  vec2 sp = uv / sR;
+  float sd = length(sp);
+  float sz = sqrt(max(0.0, 1.0 - sd*sd));
+  vec3 N = vec3(sp, sz);
+
+  // ─── Liquid glass: perturb the surface normal with SMOOTH animated flow ───
+  // Low-frequency domain-warped noise = big rolling waves instead of jitter.
+  // Also, because this is a 3D sphere, we scale the perturbation by how
+  // grazing the view angle is (pow(1-sz, ...)) so the rim — where a real
+  // glass sphere bends light most — warps hardest, while the center of the
+  // sphere stays clean like looking straight through thick glass.
+  vec2 nwp = sp * 1.6;    // lower frequency — broad smooth waves
+  vec2 flow1 = vec2(
+      fbm2(nwp + vec2( 0.0,  t*0.05)) - 0.5,
+      fbm2(nwp + vec2( 7.3, -t*0.04)) - 0.5
+  );
+  // One domain-warped octave for organic curve, no high-freq layer
+  vec2 flow2 = vec2(
+      fbm2(nwp*1.7 + flow1*1.0 + vec2( 3.1,  t*0.035)) - 0.5,
+      fbm2(nwp*1.7 + flow1*1.0 + vec2(-2.7, -t*0.030)) - 0.5
+  );
+  // Much calmer distortion — quasi-static glass, not flowing liquid.
+  vec2 nwarp = (flow1 + 0.35 * flow2) * 0.45;
+
+  // Edge weighting: (1 - sz) is 0 at center, 1 at rim. Raised to a power so
+  // the center stays almost flat and the rim is dominantly distorted.
+  float edgeWeight = pow(1.0 - sz, 1.5);
+  float distortAmp = mix(0.05, 0.85, edgeWeight);  // small in middle, strong at rim
+  vec3 Nlq = normalize(N + vec3(nwarp * distortAmp, 0.0));
+
+  // ─── Refraction through the 3D glass sphere ───
+  // Real glass: rays bend more at grazing angles. Using the perturbed normal
+  // amplifies that natural behavior at the rim. Deeper backDepth + an explicit
+  // fisheye compression makes the sphere read as a thick glass marble: the
+  // centre magnifies, and the rim compresses the interior inward so contents
+  // appear pulled in by the curved surface.
+  vec3 viewDir = vec3(0.0, 0.0, -1.0);
+  vec3 Rr = refract(viewDir, Nlq, 1.0/1.52);
+  float backDepth = 1.15;
+  vec2 spRaw = sp + Rr.xy * (backDepth / max(-Rr.z, 0.18));
+  // Radial fisheye: pulls rim content toward centre and magnifies the middle,
+  // which is the signature look of a real glass sphere / crystal ball.
+  float lens = 1.0 - pow(sd, 2.4) * 0.55;
+  vec2 spC   = spRaw * 0.78 * lens;
+  float rC = length(spC);
+
+  // Deep-blue glass volume (dense200 palette lift) — the interior is a lit
+  // navy volume, not near-black, so stars read against a proper blue body.
+  vec3 interior = cDeep * 1.25;
+  interior += mix(cDeep, cMid, 0.5) * (1.0 - smoothstep(0.0, 1.05, rC)) * 0.35;
+
+  // ─── Hyperspace star field (many stars rushing toward the viewer) ───
+  interior += starWarp(spC, t);
+
+  // ─── Volume thickness (gentle rim dimming from inside) ───
+  interior *= mix(0.65, 1.0, pow(sz, 0.55));
+
+  // ─── Glass surface shading ───
+  // Dark refraction band just inside the rim
+  float rimBand = smoothstep(0.88, 1.0, sd);
+  interior *= 1.0 - rimBand * 0.45;
+
+  // Soft fresnel tint pulling from interior brightness (dense200 formula) —
+  // the rim picks up whatever blue the volume has and glows in response to
+  // interior light, rather than being capped to a tiny flat amount.
+  float fres = pow(1.0 - sz, 3.0);
+  float bInt = dot(interior, vec3(0.33));
+  interior += cRim * fres * (0.15 + bInt*0.4);
+
+  // Subtle volume shading — contact darkening bottom-right
+  vec3 Lshade = normalize(vec3(0.35, -0.55, 0.4));
+  float shade = pow(max(0.0, dot(N, Lshade)), 2.0);
+  interior *= mix(1.0, 0.82, shade * 0.45);
+
+  // ─── Surface sparkles (on the glass itself, not refracted) ───
+  // Use sphere-surface 2D coord (sp) so sparkles sit on the shell.
+  // Hash-thresholded points that twinkle via sin(time+phase).
+  float sparkle = 0.0;
+  for (int i = 0; i < 3; i++) {
+    float fi = float(i);
+    vec2 cell = sp * (5.0 + fi*3.0);
+    vec2 ci = floor(cell);
+    vec2 cf = fract(cell) - 0.5;
+    float h = hash(ci + fi*37.0);
+    if (h > 0.94) {
+      vec2 off = vec2(hash(ci+vec2(1.0,0.0))-0.5, hash(ci+vec2(0.0,1.0))-0.5) * 0.6;
+      float d = length(cf - off);
+      float tw = 0.5 + 0.5 * sin(t*(1.5 + h*3.0) + h*20.0);
+      sparkle += exp(-d*d * 900.0) * tw;
+    }
+  }
+  // Sparkles only visible on the front-facing glass (fade at rim)
+  interior += vec3(1.0) * sparkle * smoothstep(0.1, 0.55, sz) * 0.9;
+
+  // ─── Compose ───
+  // No tone map — the Reinhard compression was pulling saturated blues toward
+  // white. dense200 composes raw, which preserves the blue palette.
+  color = mix(color, interior, sMask);
+
+  // Gentle vignette
+  color *= 1.0 - smoothstep(0.85, 1.35, dist) * 0.4;
+
+  fragColor = vec4(color, 1.0);
+}`;
+
+function createShader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.error(gl.getShaderInfoLog(s)); return null; }
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, createShader(gl.VERTEX_SHADER, vs));
+gl.attachShader(prog, createShader(gl.FRAGMENT_SHADER, fs));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(prog, 'a_pos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+const uTime = gl.getUniformLocation(prog, 'u_time');
+function render(time) {
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.uniform1f(uTime, time * 0.001);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

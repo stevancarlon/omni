@@ -1,33 +1,41 @@
 package com.buddy.assistant.service
 
+import android.app.Notification
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
+import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.FrameLayout
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.*
+import androidx.core.app.NotificationCompat
+import com.buddy.assistant.R
+import com.buddy.assistant.ui.MainActivity
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.buddy.assistant.ui.components.BuddyOrb
+import com.buddy.assistant.ui.theme.BuddyColors
+import com.buddy.assistant.ui.theme.BuddyGradients
+import com.buddy.assistant.ui.theme.BuddyShapes
+import com.buddy.assistant.ui.theme.dockPillStyle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -64,10 +72,45 @@ class BuddyOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_SHOW -> showOverlay()
+            ACTION_SHOW -> {
+                startAsForeground()
+                showOverlay()
+            }
             ACTION_HIDE -> hideOverlay()
         }
         return START_NOT_STICKY
+    }
+
+    private fun startAsForeground() {
+        val tapIntent = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val notification: Notification = NotificationCompat.Builder(this, BuddyApplication.CHANNEL_AGENT)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("Omni")
+            .setContentText("Working\u2026")
+            .setOngoing(true)
+            .setContentIntent(tapIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun stopForegroundAndSelf() {
+        try {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } catch (_: Exception) {}
+        stopSelf()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -128,11 +171,13 @@ class BuddyOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
             try { windowManager?.removeView(it) } catch (_: Exception) {}
         }
         overlayView = null
+        stopForegroundAndSelf()
     }
 
     companion object {
         const val ACTION_SHOW = "com.buddy.OVERLAY_SHOW"
         const val ACTION_HIDE = "com.buddy.OVERLAY_HIDE"
+        private const val NOTIFICATION_ID = 4242
     }
 }
 
@@ -142,35 +187,10 @@ private fun OverlayContent(
     onDismiss: () -> Unit
 ) {
     val status by agentController.status.collectAsState()
-    val think by agentController.currentThink.collectAsState()
-
-    val statusColor by animateColorAsState(
-        targetValue = when (status) {
-            is AgentStatus.VoiceListening -> Color(0xFF6C63FF)
-            is AgentStatus.Processing, is AgentStatus.Executing -> Color(0xFF3ECFCF)
-            is AgentStatus.Done -> if ((status as AgentStatus.Done).success) Color(0xFF6BCB77) else Color(0xFFFF6B6B)
-            is AgentStatus.Error -> Color(0xFFFF6B6B)
-            else -> Color(0xFF6C63FF)
-        },
-        label = "statusColor"
-    )
-
-    val pulse = rememberInfiniteTransition(label = "pulse")
-    val scale by pulse.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.15f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(800, easing = EaseInOut),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "scale"
-    )
-
-    val isActive = status is AgentStatus.VoiceListening || status is AgentStatus.Processing || status is AgentStatus.Executing
 
     val statusText = when (status) {
-        is AgentStatus.VoiceListening -> "Listening..."
-        is AgentStatus.Processing -> "Thinking..."
+        is AgentStatus.VoiceListening -> "Listening\u2026"
+        is AgentStatus.Processing -> "Thinking\u2026"
         is AgentStatus.Executing -> {
             val s = status as AgentStatus.Executing
             "Step ${s.step}/${s.maxSteps}"
@@ -180,7 +200,7 @@ private fun OverlayContent(
             if (d.success) "Done!" else d.reason
         }
         is AgentStatus.Error -> "Error"
-        else -> "Buddy"
+        else -> "Omni"
     }
 
     Box(
@@ -191,50 +211,67 @@ private fun OverlayContent(
     ) {
         Row(
             modifier = Modifier
-                .clip(RoundedCornerShape(28.dp))
-                .background(
-                    Brush.horizontalGradient(
-                        listOf(Color(0xFF0D0D2B), Color(0xFF1A1A3E))
-                    )
-                )
+                .dockPillStyle()
                 .clickable { onDismiss() }
-                .padding(horizontal = 20.dp, vertical = 14.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Pulsing dot
+            // Mini orb — renders the live shader-style orb
+            BuddyOrb(
+                status = status,
+                modifier = Modifier.size(40.dp)
+            )
+
+            // Status pill
             Box(
                 modifier = Modifier
-                    .size(12.dp)
-                    .scale(if (isActive) scale else 1f)
-                    .clip(CircleShape)
-                    .background(statusColor)
-            )
-
-            Column(modifier = Modifier.weight(1f, fill = true)) {
+                    .weight(1f)
+                    .clip(BuddyShapes.Pill)
+                    .background(BuddyColors.Surface.copy(alpha = 0.4f))
+                    .border(
+                        width = 1.dp,
+                        color = Color.White.copy(alpha = 0.08f),
+                        shape = BuddyShapes.Pill,
+                    )
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+            ) {
                 Text(
                     text = statusText,
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    textAlign = TextAlign.Start
+                    style = TextStyle(
+                        brush = BuddyGradients.SilverText,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp,
+                    ),
+                    maxLines = 1,
                 )
-                if (think.isNotBlank()) {
-                    Text(
-                        text = think.take(120),
-                        color = Color.White.copy(alpha = 0.75f),
-                        fontSize = 12.sp,
-                        textAlign = TextAlign.Start,
-                        maxLines = 2
-                    )
-                }
             }
 
-            Text(
-                text = "✕",
-                color = Color.White.copy(alpha = 0.5f),
-                fontSize = 16.sp
-            )
+            // Stop button
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(BuddyColors.Surface.copy(alpha = 0.5f))
+                    .border(
+                        width = 1.dp,
+                        color = Color.White.copy(alpha = 0.08f),
+                        shape = RoundedCornerShape(10.dp),
+                    )
+                    .clickable {
+                        agentController.reset()
+                        onDismiss()
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                // Stop icon — small rounded square
+                Box(
+                    modifier = Modifier
+                        .size(14.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(BuddyColors.InkDim)
+                )
+            }
         }
     }
 }

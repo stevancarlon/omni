@@ -38,7 +38,7 @@ class BuddyListenerService : Service() {
     // Cached settings
     private var cachedSpeechLanguage = ""
     private var cachedDeepgramKey = ""
-    private var cachedWakeWord = "hey buddy"
+    private var cachedWakeWord = "hey omni"
 
     override fun onCreate() {
         super.onCreate()
@@ -50,7 +50,7 @@ class BuddyListenerService : Service() {
             acquire()
         }
 
-        startForeground(NOTIF_ID, buildNotification("Buddy is listening..."))
+        startForeground(NOTIF_ID, buildNotification("Omni is listening..."))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -302,7 +302,7 @@ class BuddyListenerService : Service() {
     }
 
     private fun handleCommandResult(text: String, candidates: List<String>) {
-        val stopWords = listOf("stop buddy", "stop, buddy", "para buddy", "pare buddy")
+        val stopWords = listOf("stop omni", "stop, omni", "para omni", "pare omni")
         if (stopWords.any { text.contains(it) }) {
             agentController.reset()
             startWakeWordListening()
@@ -327,7 +327,7 @@ class BuddyListenerService : Service() {
             val overlayIntent = Intent(this, BuddyOverlayService::class.java).apply {
                 action = BuddyOverlayService.ACTION_SHOW
             }
-            startService(overlayIntent)
+            startForegroundService(overlayIntent)
         }
 
         scope.launch {
@@ -368,7 +368,7 @@ class BuddyListenerService : Service() {
             PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, BuddyApplication.CHANNEL_LISTENING)
-            .setContentTitle("Buddy Assistant")
+            .setContentTitle("Omni Assistant")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pendingIntent)

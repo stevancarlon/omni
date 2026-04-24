@@ -1,231 +1,603 @@
 package com.buddy.assistant.ui.screens
 
-import androidx.compose.foundation.*
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.buddy.assistant.BuddyApplication
 import com.buddy.assistant.agent.AgentController
 import com.buddy.assistant.data.AgentStatus
 import com.buddy.assistant.ui.MainActivity
 import com.buddy.assistant.ui.components.BuddyOrb
+import com.buddy.assistant.ui.theme.BuddyColors
+import com.buddy.assistant.ui.theme.BuddyGradients
+import com.buddy.assistant.ui.theme.BuddyShapes
+import com.buddy.assistant.ui.theme.BuddyTextMetrics
+import com.buddy.assistant.ui.theme.GradientIcon
+import com.buddy.assistant.ui.theme.OmniIconButton
+import com.buddy.assistant.ui.theme.dockPillStyle
 
-private val Purple = Color(0xFF6C63FF)
-private val Red = Color(0xFFFF6B6B)
-
-private val BgGradient = Brush.verticalGradient(
-    colors = listOf(Color(0xFF0A0A1A), Color(0xFF0D0D2B), Color(0xFF0A0A1A))
-)
-
+/**
+ * HomeScreen — reproduces Figma `06 · Screens` frames 15:43 (Home Idle),
+ * 15:65 (Listening), 15:82 (Thinking). Layout is state-driven: the top
+ * chrome (buddy title + credit pill) stays, the middle morphs based on
+ * [AgentStatus], and the bottom switches between the type-command bar
+ * (idle) and contextual actions (cancel / stop).
+ */
 @Composable
 fun HomeScreen(
     agentController: AgentController,
     onNavigateToSettings: () -> Unit,
-    onNavigateToSetup: () -> Unit
+    onNavigateToSetup: () -> Unit,
+    onNavigateToCredits: () -> Unit = {},
 ) {
     val status by agentController.status.collectAsState()
     val log by agentController.log.collectAsState()
-    val activity = LocalContext.current as? MainActivity
-    val listState = rememberLazyListState()
+    val think by agentController.currentThink.collectAsState()
+    val context = LocalContext.current
+    val activity = context as? MainActivity
+    val app = context.applicationContext as BuddyApplication
+    val credits by app.settingsRepository.creditsBalance.collectAsState(initial = 0)
 
-    LaunchedEffect(log.size) {
-        if (log.isNotEmpty()) listState.animateScrollToItem(log.size - 1)
+    // Debug: long-press the "omni" wordmark to cycle through orb states
+    // so we can visually QA each one without a live LLM run.
+    val debugCycle = remember {
+        listOf<AgentStatus>(
+            AgentStatus.Idle,
+            AgentStatus.WakeWordListening,
+            AgentStatus.VoiceListening,
+            AgentStatus.Processing(goal = "Plan the next move"),
+            AgentStatus.Executing(step = 3, maxSteps = 10, goal = "Open the calendar", lastAction = "Tap Calendar"),
+            AgentStatus.Speaking(text = "All set."),
+            AgentStatus.Done(success = true, reason = "Task completed."),
+            AgentStatus.Error(message = "Network unavailable."),
+        )
     }
+    var debugIdx by remember { mutableIntStateOf(0) }
 
-    Box(modifier = Modifier.fillMaxSize().background(BgGradient)) {
+    Box(modifier = Modifier.fillMaxSize().background(BuddyGradients.Background)) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.systemBars)
+                .imePadding()
         ) {
-            Spacer(modifier = Modifier.height(56.dp))
-            TopBar(onNavigateToSetup, onNavigateToSettings)
-            Spacer(modifier = Modifier.height(32.dp))
-            BuddyOrb(status = status, modifier = Modifier.size(200.dp))
-            Spacer(modifier = Modifier.height(32.dp))
-            StatusText(status)
-            Spacer(modifier = Modifier.height(24.dp))
-            ActionButtons(status, activity, agentController)
-            Spacer(modifier = Modifier.height(24.dp))
-            LogPanel(log, listState, modifier = Modifier.weight(1f))
+            Spacer(Modifier.height(16.dp))
+            HomeTopBar(
+                credits = credits,
+                onSetup = onNavigateToSetup,
+                onSettings = onNavigateToSettings,
+                onCredits = onNavigateToCredits,
+                onDebugCycle = {
+                    debugIdx = (debugIdx + 1) % debugCycle.size
+                    agentController.debugSetStatus(debugCycle[debugIdx])
+                },
+                onDebugOverlay = { activity?.debugToggleOverlay() },
+            )
+
+            AnimatedContent(
+                targetState = stateBucket(status),
+                transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(180)) },
+                label = "home-state",
+                modifier = Modifier.weight(1f)
+            ) { bucket ->
+                when (bucket) {
+                    Bucket.Idle -> IdleLayout(status)
+                    Bucket.Listening -> ListeningLayout(status, think)
+                    Bucket.Thinking -> ThinkingLayout(status, log)
+                    Bucket.Speaking -> SpeakingLayout(status)
+                    Bucket.Done -> DoneLayout(status)
+                    Bucket.Error -> ErrorLayout(status, activity)
+                }
+            }
+
+            BottomArea(status, activity, agentController)
         }
     }
 }
 
+private enum class Bucket { Idle, Listening, Thinking, Speaking, Done, Error }
+
+private fun stateBucket(status: AgentStatus): Bucket = when (status) {
+    is AgentStatus.Idle -> Bucket.Idle
+    is AgentStatus.WakeWordListening,
+    is AgentStatus.VoiceListening -> Bucket.Listening
+    is AgentStatus.Processing,
+    is AgentStatus.Executing -> Bucket.Thinking
+    is AgentStatus.Speaking -> Bucket.Speaking
+    is AgentStatus.Done -> Bucket.Done
+    is AgentStatus.Error -> Bucket.Error
+}
+
+// ─── Top bar ────────────────────────────────────────────────────────────────
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun TopBar(onSetup: () -> Unit, onSettings: () -> Unit) {
+private fun HomeTopBar(
+    credits: Int,
+    onSetup: () -> Unit,
+    onSettings: () -> Unit,
+    onCredits: () -> Unit,
+    onDebugCycle: () -> Unit = {},
+    onDebugOverlay: () -> Unit = {},
+) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = "buddy",
-            style = MaterialTheme.typography.headlineMedium.copy(
-                fontWeight = FontWeight.Light,
-                letterSpacing = 8.sp,
-                color = Color.White
-            )
+            text = "omni",
+            style = TextStyle(
+                brush = BuddyGradients.SilverText,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 22.sp,
+                letterSpacing = 3.sp,
+            ),
+            modifier = Modifier.combinedClickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null,
+                onClick = {},
+                onLongClick = onDebugCycle,
+            ),
         )
-        Row {
-            IconButton(onClick = onSetup) {
-                Icon(Icons.Default.CheckCircle, "Setup", tint = Color.White.copy(alpha = 0.7f))
-            }
-            IconButton(onClick = onSettings) {
-                Icon(Icons.Default.Settings, "Settings", tint = Color.White.copy(alpha = 0.7f))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CreditPill(credits = credits, onClick = onCredits, onLongClick = onDebugOverlay)
+            Spacer(Modifier.width(8.dp))
+            IconButton(onClick = onSettings, modifier = Modifier.size(32.dp)) {
+                GradientIcon(Icons.Default.Settings, "Settings")
             }
         }
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun ActionButtons(
-    status: AgentStatus,
-    activity: MainActivity?,
-    agentController: AgentController
-) {
+private fun CreditPill(credits: Int, onClick: () -> Unit, onLongClick: () -> Unit = {}) {
     Row(
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.CenterVertically
+        modifier = Modifier
+            .clip(BuddyShapes.Pill)
+            .background(BuddyColors.Surface.copy(alpha = 0.55f))
+            .border(1.dp, BuddyColors.InkGhost, BuddyShapes.Pill)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        when (status) {
-            is AgentStatus.Idle, is AgentStatus.Done ->
-                PrimaryButton("Start Listening", Icons.Default.Mic) {
-                    activity?.startListenerService()
-                }
-            is AgentStatus.Error ->
-                ErrorActionButton(status, activity)
-            is AgentStatus.Processing, is AgentStatus.Executing ->
-                StopButton("Stop") { agentController.reset() }
-            is AgentStatus.WakeWordListening, is AgentStatus.VoiceListening ->
-                StopButton("Stop Listening", Icons.Default.MicOff) {
-                    activity?.stopCommandListening()
-                }
-            is AgentStatus.Speaking -> {}
-        }
+        Box(
+            Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(BuddyColors.Success)
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            "$credits cr",
+            color = BuddyColors.InkDim,
+            fontSize = 11.sp,
+            letterSpacing = 0.5.sp,
+        )
     }
 }
 
-@Composable
-private fun ErrorActionButton(status: AgentStatus.Error, activity: MainActivity?) {
-    val isAccessibilityError = status.message.contains("Accessibility", ignoreCase = true)
-    if (isAccessibilityError) {
-        PrimaryButton("Open Accessibility Settings", Icons.Default.Settings) {
-            activity?.openAccessibilitySettings()
-        }
-    } else {
-        PrimaryButton("Start Listening", Icons.Default.Mic) {
-            activity?.startListenerService()
-        }
-    }
-}
+// ─── Idle ───────────────────────────────────────────────────────────────────
 
 @Composable
-private fun PrimaryButton(label: String, icon: ImageVector, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        colors = ButtonDefaults.buttonColors(containerColor = Purple),
-        shape = RoundedCornerShape(50)
-    ) {
-        Icon(icon, contentDescription = null)
-        Spacer(Modifier.width(8.dp))
-        Text(label)
-    }
-}
-
-@Composable
-private fun StopButton(
-    label: String,
-    icon: ImageVector = Icons.Default.Stop,
-    onClick: () -> Unit
-) {
-    OutlinedButton(
-        onClick = onClick,
-        colors = ButtonDefaults.outlinedButtonColors(contentColor = Red),
-        border = BorderStroke(1.dp, Red),
-        shape = RoundedCornerShape(50)
-    ) {
-        Icon(icon, contentDescription = null)
-        Spacer(Modifier.width(8.dp))
-        Text(label)
-    }
-}
-
-@Composable
-private fun LogPanel(
-    log: List<String>,
-    listState: androidx.compose.foundation.lazy.LazyListState,
-    modifier: Modifier = Modifier
-) {
-    if (log.isEmpty()) return
-
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.05f)),
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+private fun IdleLayout(status: AgentStatus) {
+    // DS 2.0 idle: orb centered with two-line prompt below. We drive size off
+    // the available height so the group stays centered and fully visible even
+    // when the keyboard is open and the weight(1f) slot is compressed.
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val compact = maxHeight < 440.dp
+        val orbSize = if (compact) (maxHeight * 0.45f).coerceAtMost(160.dp) else 200.dp
+        val gap = if (compact) 20.dp else 40.dp
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
         ) {
-            items(log) { entry ->
+            BuddyOrb(status = status, modifier = Modifier.size(orbSize))
+            Spacer(Modifier.height(gap))
+            Text(
+                text = if (compact) "Ready when you are." else "Say \u201CHey Omni\u201D",
+                style = TextStyle(
+                    brush = BuddyGradients.SilverText,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Light,
+                    letterSpacing = 0.4.sp,
+                ),
+            )
+            if (!compact) {
+                Spacer(Modifier.height(6.dp))
                 Text(
-                    text = entry.substringAfter("] "),
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = FontFamily.Monospace,
-                        color = logEntryColor(entry),
-                        fontSize = 11.sp
-                    )
+                    text = "or tap the orb to speak",
+                    color = BuddyColors.InkMute,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Light,
+                    letterSpacing = 0.2.sp,
                 )
             }
         }
     }
-    Spacer(modifier = Modifier.height(16.dp))
 }
 
-private fun logEntryColor(entry: String): Color = when {
-    entry.contains("Error") || entry.contains("failed") -> Color(0xFFFF6B6B)
-    entry.contains("Done") || entry.contains("success") -> Color(0xFF6BCB77)
-    entry.contains("Think") -> Color(0xFF6C63FF).copy(alpha = 0.9f)
-    entry.contains("User:") -> Color(0xFFFFD93D)
-    else -> Color.White.copy(alpha = 0.7f)
+// ─── Listening ──────────────────────────────────────────────────────────────
+
+@Composable
+private fun ListeningLayout(status: AgentStatus, think: String) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.height(20.dp))
+        Text(
+            "Listening\u2026",
+            style = MaterialTheme.typography.titleLarge.copy(
+                color = BuddyColors.Ink,
+                fontWeight = FontWeight.Light,
+                letterSpacing = 1.sp,
+            ),
+        )
+        Spacer(Modifier.weight(1f))
+        BuddyOrb(status = status, modifier = Modifier.size(260.dp))
+        Spacer(Modifier.weight(1f))
+        TranscriptCard(think)
+        Spacer(Modifier.height(24.dp))
+    }
 }
 
 @Composable
-private fun StatusText(status: AgentStatus) {
-    val text = when (status) {
-        is AgentStatus.Idle -> "Tap \"Start Listening\" or say \"Hey Buddy\""
-        is AgentStatus.WakeWordListening -> "Listening for wake word..."
-        is AgentStatus.VoiceListening -> "Listening... speak your command"
-        is AgentStatus.Processing -> "Processing: \"${status.goal}\""
-        is AgentStatus.Executing -> "Step ${status.step}/${status.maxSteps} — ${status.lastAction}"
-        is AgentStatus.Speaking -> "\"${status.text}\""
-        is AgentStatus.Done -> if (status.success) "Done! ${status.reason}" else "Couldn't complete: ${status.reason}"
-        is AgentStatus.Error -> "Error: ${status.message}"
+private fun TranscriptCard(text: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(BuddyShapes.Card)
+            .background(BuddyColors.Surface.copy(alpha = 0.5f))
+            .border(1.dp, BuddyColors.InkGhost, BuddyShapes.Card)
+            .padding(20.dp),
+    ) {
+        Text(
+            "YOU SAID",
+            color = BuddyColors.Accent,
+            fontSize = 10.sp,
+            letterSpacing = BuddyTextMetrics.CapsTightSp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = if (text.isBlank()) "\u2026" else "\u201C$text\u201D",
+            color = BuddyColors.Ink,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Light,
+            lineHeight = 22.sp,
+        )
+    }
+}
+
+// ─── Thinking / Executing ───────────────────────────────────────────────────
+
+@Composable
+private fun ThinkingLayout(status: AgentStatus, log: List<String>) {
+    val (stepNumber, maxSteps) = when (status) {
+        is AgentStatus.Executing -> status.step to status.maxSteps
+        else -> 1 to 1
+    }
+    val headline = when (status) {
+        is AgentStatus.Executing -> status.lastAction.ifBlank { "Working\u2026" }
+        is AgentStatus.Processing -> "Thinking\u2026"
+        else -> "Working\u2026"
+    }
+    val subline = when (status) {
+        is AgentStatus.Processing -> status.goal
+        is AgentStatus.Executing -> "Towards: ${status.goal}"
+        else -> ""
     }
 
-    Text(
-        text = text,
-        style = MaterialTheme.typography.bodyMedium.copy(
-            color = Color.White.copy(alpha = 0.8f),
-            textAlign = TextAlign.Center
-        ),
-        modifier = Modifier.padding(horizontal = 32.dp)
+    Column(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.Start,
+    ) {
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "RUNNING TASK",
+            color = BuddyColors.Accent,
+            fontSize = 10.sp,
+            letterSpacing = BuddyTextMetrics.CapsTightSp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Step $stepNumber of $maxSteps",
+            color = BuddyColors.InkDim,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Light,
+        )
+
+        Box(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            BuddyOrb(status = status, modifier = Modifier.size(160.dp))
+        }
+
+        Text(
+            headline,
+            color = BuddyColors.Ink,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Light,
+            lineHeight = 26.sp,
+        )
+        if (subline.isNotBlank()) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                subline,
+                color = BuddyColors.InkMute,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+        ProgressBar(progress = stepNumber.toFloat() / maxSteps.coerceAtLeast(1))
+
+        Spacer(Modifier.height(20.dp))
+        StepList(log.takeLast(5))
+    }
+}
+
+@Composable
+private fun ProgressBar(progress: Float) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(6.dp)
+            .clip(RoundedCornerShape(3.dp))
+            .background(BuddyColors.Surface.copy(alpha = 0.6f)),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(progress.coerceIn(0f, 1f))
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(3.dp))
+                .background(BuddyGradients.iris()),
+        )
+    }
+}
+
+@Composable
+private fun StepList(entries: List<String>) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        entries.forEach { entry ->
+            val text = entry.substringAfter("] ")
+            val color = when {
+                text.startsWith("Result:") && text.contains("success") -> BuddyColors.Success
+                text.startsWith("Result:") && text.contains("failed") -> BuddyColors.Error
+                text.startsWith("Action:") -> BuddyColors.AuroraPink
+                text.startsWith("Think:") -> BuddyColors.AuroraLavender
+                else -> BuddyColors.InkMute
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(vertical = 2.dp),
+            ) {
+                Box(
+                    Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(color.copy(alpha = 0.85f)),
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text,
+                    color = BuddyColors.InkDim,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Light,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+// ─── Speaking / Done / Error ────────────────────────────────────────────────
+
+@Composable
+private fun SpeakingLayout(status: AgentStatus) {
+    val text = (status as? AgentStatus.Speaking)?.text ?: ""
+    CenteredCaption(status = status, caption = "\u201C$text\u201D", tone = BuddyColors.AuroraPeach)
+}
+
+@Composable
+private fun DoneLayout(status: AgentStatus) {
+    val done = status as? AgentStatus.Done
+    val success = done?.success == true
+    val tone = if (success) BuddyColors.Success else BuddyColors.Error
+    CenteredCaption(
+        status = status,
+        caption = if (success) "Done! ${done?.reason.orEmpty()}" else "Couldn\u2019t complete: ${done?.reason.orEmpty()}",
+        tone = tone,
     )
 }
+
+@Composable
+private fun ErrorLayout(status: AgentStatus, activity: MainActivity?) {
+    CenteredCaption(
+        status = status,
+        caption = (status as? AgentStatus.Error)?.message ?: "Something went wrong.",
+        tone = BuddyColors.Error,
+    )
+}
+
+@Composable
+private fun CenteredCaption(status: AgentStatus, caption: String, tone: Color) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.weight(1f))
+        BuddyOrb(status = status, modifier = Modifier.size(220.dp))
+        Spacer(Modifier.height(32.dp))
+        Text(
+            caption,
+            color = BuddyColors.Ink,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Light,
+            textAlign = TextAlign.Center,
+            lineHeight = 24.sp,
+        )
+        Spacer(Modifier.height(12.dp))
+        Box(
+            Modifier
+                .width(48.dp)
+                .height(2.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(tone.copy(alpha = 0.7f))
+        )
+        Spacer(Modifier.weight(1f))
+    }
+}
+
+// ─── Bottom area ────────────────────────────────────────────────────────────
+
+@Composable
+private fun BottomArea(
+    status: AgentStatus,
+    activity: MainActivity?,
+    agentController: AgentController,
+) {
+    Column(modifier = Modifier.padding(horizontal = 24.dp)) {
+        when (status) {
+            is AgentStatus.Idle, is AgentStatus.Done, is AgentStatus.Error -> {
+                TypeCommandBar(
+                    onMic = { activity?.startListenerService() },
+                    onSubmit = { text ->
+                        if (text.isNotBlank()) agentController.onCommandReceived(text)
+                    },
+                )
+                Spacer(Modifier.height(24.dp))
+            }
+            is AgentStatus.WakeWordListening, is AgentStatus.VoiceListening -> {
+                CancelButton("Cancel") { activity?.stopCommandListening() }
+                Spacer(Modifier.height(24.dp))
+            }
+            is AgentStatus.Processing, is AgentStatus.Executing -> {
+                CancelButton("Stop task") { agentController.reset() }
+                Spacer(Modifier.height(24.dp))
+            }
+            is AgentStatus.Speaking -> Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun TypeCommandBar(onMic: () -> Unit, onSubmit: (String) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(BuddyShapes.Pill)
+            .background(BuddyColors.Surface.copy(alpha = 0.6f))
+            .border(1.dp, BuddyColors.InkGhost, BuddyShapes.Pill)
+            .padding(start = 22.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(modifier = Modifier.weight(1f)) {
+            if (text.isEmpty()) {
+                Text(
+                    "Type a command\u2026",
+                    color = BuddyColors.InkMute,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Light,
+                )
+            }
+            BasicTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+                cursorBrush = SolidColor(BuddyColors.Accent),
+                textStyle = TextStyle(color = BuddyColors.Ink, fontSize = 14.sp),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        MicFab(
+            icon = if (text.isBlank()) Icons.Default.Mic else Icons.AutoMirrored.Filled.ArrowForward,
+            onClick = {
+                if (text.isBlank()) onMic() else {
+                    onSubmit(text)
+                    text = ""
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun MicFab(icon: ImageVector, onClick: () -> Unit) {
+    // DS 2.0: circular dock-pill FAB with silver-gradient icon.
+    OmniIconButton(onClick = onClick, size = 44.dp) {
+        GradientIcon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+@Composable
+private fun CancelButton(label: String, onClick: () -> Unit) {
+    // Figma spec for secondary CTA on Listening / Thinking screens:
+    //   fill white α0.06, border white α0.16, ink text, pill corner.
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(BuddyShapes.Pill)
+            .background(Color.White.copy(alpha = 0.06f))
+            .border(1.dp, Color.White.copy(alpha = 0.16f), BuddyShapes.Pill)
+            .clickable { onClick() }
+            .padding(vertical = 18.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = BuddyColors.Ink,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium,
+            letterSpacing = 0.5.sp,
+        )
+    }
+}
+

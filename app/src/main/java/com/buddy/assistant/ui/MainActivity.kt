@@ -19,6 +19,7 @@ import androidx.core.content.ContextCompat
 import com.buddy.assistant.BuddyApplication
 import com.buddy.assistant.agent.AgentController
 import com.buddy.assistant.service.BuddyListenerService
+import com.buddy.assistant.service.BuddyOverlayService
 import com.buddy.assistant.ui.theme.BuddyTheme
 
 class MainActivity : ComponentActivity() {
@@ -103,6 +104,19 @@ class MainActivity : ComponentActivity() {
 
     fun openAccessibilitySettings() {
         startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+    }
+
+    private var debugOverlayVisible = false
+    fun debugToggleOverlay() {
+        val intent = Intent(this, BuddyOverlayService::class.java)
+        if (debugOverlayVisible) {
+            intent.action = BuddyOverlayService.ACTION_HIDE
+            startService(intent)
+        } else {
+            intent.action = BuddyOverlayService.ACTION_SHOW
+            startForegroundService(intent)
+        }
+        debugOverlayVisible = !debugOverlayVisible
     }
 
     private fun launchListenerService() {

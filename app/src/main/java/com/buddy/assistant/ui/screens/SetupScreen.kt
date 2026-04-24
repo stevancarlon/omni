@@ -1,121 +1,152 @@
 package com.buddy.assistant.ui.screens
 
+import android.Manifest
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import com.buddy.assistant.service.BuddyAccessibilityService
+import androidx.compose.ui.text.TextStyle
+import com.buddy.assistant.ui.theme.BuddyColors
+import com.buddy.assistant.ui.theme.BuddyGradients
+import com.buddy.assistant.ui.theme.BuddyShapes
+import com.buddy.assistant.ui.theme.BuddyTextMetrics
+import com.buddy.assistant.ui.theme.OmniButton
 
+/**
+ * SetupScreen — mirrors Figma `2 · Permissions` (node 15:20).
+ *
+ * Layout:
+ *   "Quick setup" (display) + "Three permissions for full power" (sub)
+ *   Three permission cards — 332×96 each, 36dp circle badge (✓ if granted, number otherwise).
+ *   Continue CTA at bottom.
+ */
 @Composable
 fun SetupScreen(onBack: () -> Unit) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-    val bgGradient = Brush.verticalGradient(
-        colors = listOf(Color(0xFF0A0A1A), Color(0xFF0D0D2B), Color(0xFF0A0A1A))
-    )
+    // Re-evaluate on each resume so the badges flip to ✓ after the user
+    // comes back from the system settings screen.
+    var tick by remember { mutableStateOf(0) }
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) tick++
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+    val accessibilityGranted = remember(tick) { BuddyAccessibilityService.instance != null }
+    val micGranted = remember(tick) {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+    val overlayGranted = remember(tick) { Settings.canDrawOverlays(context) }
+
+    val allGranted = accessibilityGranted && micGranted && overlayGranted
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(bgGradient)
+            .background(BuddyGradients.Background)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .windowInsetsPadding(WindowInsets.systemBars)
+                .padding(horizontal = 24.dp)
         ) {
-            Spacer(modifier = Modifier.height(48.dp))
+            Spacer(Modifier.height(16.dp))
 
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = BuddyColors.Ink)
                 }
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    "Setup",
-                    style = MaterialTheme.typography.headlineSmall.copy(
-                        color = Color.White,
-                        fontWeight = FontWeight.Light,
-                        letterSpacing = 4.sp
-                    )
-                )
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(Modifier.height(16.dp))
 
             Text(
-                "Complete these steps to activate Buddy",
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    color = Color.White.copy(alpha = 0.6f),
-                    textAlign = TextAlign.Center
-                )
+                "Quick setup",
+                style = MaterialTheme.typography.displaySmall.copy(
+                    brush = BuddyGradients.SilverText,
+                    fontWeight = FontWeight.Light,
+                    letterSpacing = 0.5.sp,
+                    fontSize = 40.sp,
+                ),
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Three permissions for full power",
+                color = BuddyColors.InkMute,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Light,
             )
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(Modifier.height(28.dp))
 
-            SetupStep(
-                number = 1,
-                title = "Enable Accessibility Service",
-                description = "Buddy needs accessibility access to read your screen and perform actions on your behalf.",
-                buttonText = "Open Accessibility Settings",
-                onClick = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+            PermissionCard(
+                index = 1,
+                granted = accessibilityGranted,
+                title = "Accessibility",
+                description = "Read the screen, tap buttons.",
+                onClick = {
+                    context.startActivity(
+                        Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                },
             )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            SetupStep(
-                number = 2,
-                title = "Set Buddy as Default Assistant",
-                description = "Replace Google Assistant with Buddy so you can activate it with the home button or voice.",
-                buttonText = "Open Assistant Settings",
-                onClick = { context.startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) }
+            Spacer(Modifier.height(16.dp))
+            PermissionCard(
+                index = 2,
+                granted = micGranted,
+                title = "Microphone",
+                description = "Hear \u201CHey Omni\u201D anytime.",
+                onClick = {
+                    // Microphone permission is requested at first use; nudging to app settings
+                    // is the next best thing if the user denied it.
+                    context.startActivity(
+                        Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:${context.packageName}")
+                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                },
             )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            SetupStep(
-                number = 3,
-                title = "Configure API Key",
-                description = "Add your Claude or OpenAI API key in Settings to power Buddy's intelligence.",
-                buttonText = "Go to Settings",
-                onClick = onBack
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            SetupStep(
-                number = 4,
-                title = "Grant Microphone Permission",
-                description = "Buddy needs microphone access to hear your voice commands.",
-                buttonText = "Already granted if you see this",
-                onClick = {}
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            SetupStep(
-                number = 5,
-                title = "Allow Overlay",
-                description = "Buddy shows a floating status overlay while it's working, so you can see what it's doing on top of other apps.",
-                buttonText = "Open Overlay Settings",
+            Spacer(Modifier.height(16.dp))
+            PermissionCard(
+                index = 3,
+                granted = overlayGranted,
+                title = "Overlay",
+                description = "Show status over other apps.",
                 onClick = {
                     context.startActivity(
                         Intent(
@@ -123,73 +154,119 @@ fun SetupScreen(onBack: () -> Unit) {
                             Uri.parse("package:${context.packageName}")
                         ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     )
-                }
+                },
             )
 
-            Spacer(modifier = Modifier.height(80.dp))
+            Spacer(Modifier.weight(1f))
+
+            ContinueButton(enabled = allGranted, onClick = onBack)
+            Spacer(Modifier.height(32.dp))
         }
     }
 }
 
 @Composable
-private fun SetupStep(
-    number: Int,
+private fun PermissionCard(
+    index: Int,
+    granted: Boolean,
     title: String,
     description: String,
-    buttonText: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
 ) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = Color.White.copy(alpha = 0.05f)
-        ),
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(BuddyShapes.Card)
+            .background(BuddyColors.Surface.copy(alpha = 0.55f))
+            .border(1.dp, BuddyColors.InkGhost, BuddyShapes.Card)
+            .clickable { onClick() }
+            .padding(horizontal = 20.dp, vertical = 20.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = Color(0xFF6C63FF),
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            "$number",
-                            style = MaterialTheme.typography.labelLarge.copy(
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        color = Color.White,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                )
-            }
-            Spacer(modifier = Modifier.height(8.dp))
+        PermissionBadge(granted = granted, index = index)
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                color = BuddyColors.Ink,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.height(2.dp))
             Text(
                 description,
-                style = MaterialTheme.typography.bodySmall.copy(
-                    color = Color.White.copy(alpha = 0.6f)
-                )
+                color = BuddyColors.InkDim,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Light,
             )
-            Spacer(modifier = Modifier.height(12.dp))
-            Button(
-                onClick = onClick,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF6C63FF).copy(alpha = 0.8f)
+        }
+        Icon(
+            Icons.Default.ChevronRight,
+            contentDescription = null,
+            tint = BuddyColors.InkMute,
+        )
+    }
+}
+
+@Composable
+private fun PermissionBadge(granted: Boolean, index: Int) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .then(
+                if (granted)
+                    Modifier.background(BuddyColors.Success)
+                else
+                    Modifier.background(BuddyGradients.iris())
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (granted) {
+            Icon(
+                Icons.Default.Check,
+                contentDescription = "Granted",
+                tint = BuddyColors.Ink,
+                modifier = Modifier.size(18.dp),
+            )
+        } else {
+            Text(
+                "$index",
+                color = BuddyColors.Bg,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ContinueButton(enabled: Boolean, onClick: () -> Unit) {
+    OmniButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth(),
+        fillMaxWidth = true,
+        contentPadding = PaddingValues(vertical = 18.dp),
+    ) {
+        if (enabled) {
+            Text(
+                text = "Continue",
+                style = TextStyle(
+                    brush = BuddyGradients.SilverText,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
+                    letterSpacing = 0.4.sp,
                 ),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(buttonText, style = MaterialTheme.typography.labelMedium)
-            }
+            )
+        } else {
+            Text(
+                text = "Grant permissions to continue",
+                color = BuddyColors.InkMute,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 0.4.sp,
+            )
         }
     }
 }

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "figma": {
+      "command": "npx -y ai-figma-mcp@latest",
+      "lifecycle": "keep-alive"
+    }
+  }
+}

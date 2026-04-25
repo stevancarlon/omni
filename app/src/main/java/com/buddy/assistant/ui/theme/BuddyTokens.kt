@@ -44,11 +44,16 @@ import androidx.compose.ui.unit.sp
  * Mirrors `04 · Foundations` + the iris orb palette used across the Figma system.
  */
 object BuddyColors {
-    // Surfaces
-    val Bg = Color(0xFF0A0A1A)          // BG0 — deep near-black
-    val BgMid = Color(0xFF0D0D2B)       // BG0 midtone used in bg vertical gradient
-    val Surface = Color(0xFF1C1C3D)     // SURF — card/surface base
-    val SurfaceHi = Color(0xFF2A2A52)   // elevated surface (hover/pressed)
+    // Surfaces — DS 2.0 uses a near-black single-tone background, not a navy gradient.
+    val Bg = Color(0xFF0A0A0C)          // BG0 — Figma `#0A0A0C`
+    val BgMid = Color(0xFF0A0A0C)       // (kept for compat — same value, no gradient)
+    val Surface = Color(0xFF1C1C3D)     // SURF — card/surface base (legacy)
+    val SurfaceHi = Color(0xFF2A2A52)   // elevated surface (hover/pressed) (legacy)
+    /** DS 2.0 hairline used on cards/chips/CTAs — Figma `#2A2B32`. */
+    val Hairline = Color(0xFF2A2B32)
+    /** DS 2.0 brand blue — used for chip selection + CTA glow. */
+    val BrandBlue = Color(0xFF5B8CFF)
+    val BrandBlueGlow = Color(0xFF6CB8FF)
 
     // Ink
     val Ink = Color(0xFFFFFFFF)
@@ -80,9 +85,13 @@ object BuddyColors {
 }
 
 object BuddyGradients {
-    /** Full-screen vertical background used on every screen. */
-    val Background = Brush.verticalGradient(
-        colors = listOf(BuddyColors.Bg, BuddyColors.BgMid, BuddyColors.Bg)
+    /**
+     * Full-screen background. DS 2.0 is solid `#0A0A0C` on every screen
+     * (Welcome/Home/Setup/Settings/Credits). The `Brush` form is kept so
+     * existing callers don't break, but it paints a flat tone now.
+     */
+    val Background: Brush = Brush.verticalGradient(
+        colors = listOf(BuddyColors.Bg, BuddyColors.Bg)
     )
 
     /**
@@ -148,23 +157,41 @@ object BuddyGradients {
         )
     )
 
-    /** DS 2.0 overlay dock: vertical gradient (top-lit dark metal). */
+    /**
+     * DS 2.0 dark-metal surface — used on every primary CTA, card, balance
+     * tile, settings card, and tier row. Vertical gradient
+     * `#26272C → 55% #1C1D22 → #101114`, top-lit.
+     */
     val DockPill: Brush = Brush.verticalGradient(
         colorStops = arrayOf(
-            0f to Color(0xFF2E2F37),
+            0f to Color(0xFF26272C),
             0.55f to Color(0xFF1C1D22),
             1f to Color(0xFF101114),
         )
     )
 
-    /** Inner shadow bevel for dock pill — bright 1px top edge, dark 1px bottom. */
+    /**
+     * Bevel for the dark-metal surface — top edge highlight `#3A3C44 α0.9`
+     * (1px), bottom edge shade `#000 α0.6` (1px). Implemented as a 4-stop
+     * vertical brush so we can stack it as a second `.background()` layer.
+     */
     val DockInnerShadow: Brush = Brush.verticalGradient(
         colorStops = arrayOf(
-            0f to Color.White.copy(alpha = 0.30f),
-            0.02f to Color.Transparent,
-            0.98f to Color.Transparent,
-            1f to Color.Black.copy(alpha = 0.50f),
+            0f to Color(0xFF3A3C44).copy(alpha = 0.90f),
+            0.025f to Color.Transparent,
+            0.975f to Color.Transparent,
+            1f to Color.Black.copy(alpha = 0.60f),
         )
+    )
+
+    /**
+     * Blue gradient used on the Credits "Buy credits" primary action —
+     * horizontal sweep deep navy `#1E3B6E → #6CB8FF`. Distinct from the dark
+     * metal CTA used elsewhere; reserved for the single most prominent
+     * monetary action in the app.
+     */
+    val PrimaryBlue: Brush = Brush.horizontalGradient(
+        colors = listOf(Color(0xFF1E3B6E), Color(0xFF6CB8FF))
     )
 
     /** Card surface with a hint of warmth — subtle aurora glow on top. */
@@ -243,12 +270,33 @@ fun BoxScope.IrisHalo(
  * Modifier.fillMaxWidth().liquidGlass(BuddyShapes.Pill, enabled = selected)
  * ```
  */
-/** DS 2.0 dock pill style: gradient fill + inner shadow bevel + border. */
+/**
+ * DS 2.0 dark-metal surface — gradient fill + inner shadow bevel + hairline
+ * border. Used for cards, balance tiles, tier rows, settings groups, and
+ * the (non-CTA) overlay dock. CTAs add a blue hairline + glow on top via
+ * [Modifier.ctaPillStyle].
+ */
 fun Modifier.dockPillStyle(shape: Shape = BuddyShapes.DockPill): Modifier = this
     .clip(shape)
     .background(BuddyGradients.DockPill)
     .background(BuddyGradients.DockInnerShadow)
-    .border(1.dp, Color.White.copy(alpha = 0.10f), shape)
+    .border(1.dp, BuddyColors.Hairline, shape)
+
+/**
+ * DS 2.0 primary CTA style — same dark-metal body as a card, plus the
+ * Figma-specified blue accent: hairline `rgba(108,184,255,0.55)`, outer
+ * glow `0 0 24dp rgba(108,184,255,0.35)`. Apply this to setup/welcome
+ * CTAs. The blue tint is what distinguishes a CTA from a card.
+ *
+ * NOTE: the outer blue glow is supplied by the caller via `.shadow(...)`
+ * with a tinted spotColor — Compose `Modifier.shadow` is the only way to
+ * tint elevation in a way that's actually rendered correctly.
+ */
+fun Modifier.ctaPillStyle(shape: Shape = BuddyShapes.DockPill): Modifier = this
+    .clip(shape)
+    .background(BuddyGradients.DockPill)
+    .background(BuddyGradients.DockInnerShadow)
+    .border(1.dp, Color(0xFF6CB8FF).copy(alpha = 0.55f), shape)
 
 /**
  * OmniButton — DS 2.0 primary CTA. Dark metal pill with inner-shadow bevel +
@@ -269,22 +317,24 @@ fun OmniButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     fillMaxWidth: Boolean = false,
-    shape: Shape = BuddyShapes.Pill,
+    shape: Shape = RoundedCornerShape(28.dp),
     contentPadding: PaddingValues = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
     enabled: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
+    // Blue glow shadow comes from spotColor=BrandBlueGlow on the elevation.
+    // Compose tints elevation accurately on API 28+; we're at minSdk 29.
     Box(
         modifier = modifier
             .then(if (fillMaxWidth) Modifier.fillMaxWidth() else Modifier)
             .shadow(
-                elevation = if (enabled) 12.dp else 0.dp,
+                elevation = if (enabled) 24.dp else 0.dp,
                 shape = shape,
-                ambientColor = Color.Black,
-                spotColor = Color.Black,
+                ambientColor = Color(0xFF6CB8FF).copy(alpha = 0.35f),
+                spotColor = Color(0xFF6CB8FF).copy(alpha = 0.35f),
             )
-            .dockPillStyle(shape)
+            .ctaPillStyle(shape)
             .clickable(
                 interactionSource = interactionSource,
                 indication = ripple(color = Color.White.copy(alpha = 0.4f)),

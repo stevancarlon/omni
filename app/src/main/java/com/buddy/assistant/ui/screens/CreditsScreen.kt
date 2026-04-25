@@ -3,14 +3,17 @@ package com.buddy.assistant.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -21,6 +24,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -31,7 +36,8 @@ import com.buddy.assistant.ui.theme.BuddyColors
 import com.buddy.assistant.ui.theme.BuddyGradients
 import com.buddy.assistant.ui.theme.BuddyShapes
 import com.buddy.assistant.ui.theme.BuddyTextMetrics
-import com.buddy.assistant.ui.theme.OmniButton
+import com.buddy.assistant.ui.theme.ctaPillStyle
+import com.buddy.assistant.ui.theme.dockPillStyle
 import kotlinx.coroutines.launch
 
 /**
@@ -140,12 +146,11 @@ enum class CreditTier(val credits: Int, val price: String, val badge: String) {
 
 @Composable
 private fun BalanceCard(balance: Int) {
+    // DS 2.0 dark-metal card — gradient body + bevel + gray hairline.
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(BuddyShapes.CardLg)
-            .background(BuddyColors.Surface.copy(alpha = 0.55f))
-            .border(1.dp, BuddyColors.InkGhost, BuddyShapes.CardLg)
+            .dockPillStyle(BuddyShapes.CardLg)
             .padding(horizontal = 24.dp, vertical = 20.dp),
     ) {
         Text(
@@ -180,24 +185,33 @@ private fun BalanceCard(balance: Int) {
 
 @Composable
 private fun TierRow(tier: CreditTier, selected: Boolean, onClick: () -> Unit) {
-    val borderColor = if (selected) BuddyColors.Accent else BuddyColors.InkGhost
-    val surfaceAlpha = if (selected) 0.75f else 0.5f
+    // DS 2.0 tier row — same dark-metal gradient body for every row. When
+    // selected, swap the gray hairline for the blue CTA hairline. Badges are
+    // always neutral gray (`#A7ADBC`) — no pink "Popular"/"Best value" tint
+    // per Figma `6 · Credits`.
+    val tierShape = RoundedCornerShape(16.dp)
+    val style = if (selected) Modifier.ctaPillStyle(tierShape) else Modifier.dockPillStyle(tierShape)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(BuddyShapes.Card)
-            .background(BuddyColors.Surface.copy(alpha = surfaceAlpha))
-            .border(1.dp, borderColor, BuddyShapes.Card)
-            .clickable { onClick() }
+            .then(style)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { onClick() }
             .padding(horizontal = 20.dp, vertical = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Radio indicator
+        // Radio indicator — hairline ring; filled with brand blue when active.
         Box(
             modifier = Modifier
                 .size(20.dp)
                 .clip(CircleShape)
-                .border(1.5.dp, if (selected) BuddyColors.Accent else BuddyColors.InkMute, CircleShape),
+                .border(
+                    width = 1.5.dp,
+                    color = if (selected) BuddyColors.BrandBlueGlow else BuddyColors.Hairline,
+                    shape = CircleShape,
+                ),
             contentAlignment = Alignment.Center,
         ) {
             if (selected) {
@@ -205,7 +219,7 @@ private fun TierRow(tier: CreditTier, selected: Boolean, onClick: () -> Unit) {
                     Modifier
                         .size(10.dp)
                         .clip(CircleShape)
-                        .background(BuddyColors.Accent),
+                        .background(BuddyColors.BrandBlueGlow),
                 )
             }
         }
@@ -220,7 +234,7 @@ private fun TierRow(tier: CreditTier, selected: Boolean, onClick: () -> Unit) {
             Spacer(Modifier.height(3.dp))
             Text(
                 tier.badge,
-                color = if (tier != CreditTier.Basic) BuddyColors.AuroraPink else BuddyColors.InkMute,
+                color = Color(0xFFA7ADBC),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Light,
             )
@@ -233,9 +247,7 @@ private fun TierRow(tier: CreditTier, selected: Boolean, onClick: () -> Unit) {
 private fun PricePill(price: String) {
     Box(
         modifier = Modifier
-            .clip(BuddyShapes.Pill)
-            .background(BuddyColors.SurfaceHi)
-            .border(1.dp, BuddyColors.InkGhost, BuddyShapes.Pill)
+            .dockPillStyle(BuddyShapes.Pill)
             .padding(horizontal = 18.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -249,22 +261,42 @@ private fun PricePill(price: String) {
     }
 }
 
+/**
+ * Buy credits CTA — distinct from the standard `OmniButton` because Figma
+ * specs the most prominent monetary action with a horizontal blue gradient
+ * body (`#1E3B6E → #6CB8FF`) instead of the dark-metal body. Keeps the same
+ * blue hairline + 24dp blue outer glow as every other CTA.
+ */
 @Composable
 private fun BuyButton(onClick: () -> Unit) {
-    OmniButton(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        fillMaxWidth = true,
-        contentPadding = PaddingValues(vertical = 18.dp),
+    val shape = BuddyShapes.Pill
+    val interaction = remember { MutableInteractionSource() }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 24.dp,
+                shape = shape,
+                ambientColor = Color(0xFF6CB8FF).copy(alpha = 0.35f),
+                spotColor = Color(0xFF6CB8FF).copy(alpha = 0.35f),
+            )
+            .clip(shape)
+            .background(BuddyGradients.PrimaryBlue)
+            .border(1.dp, Color(0xFF6CB8FF).copy(alpha = 0.55f), shape)
+            .clickable(
+                interactionSource = interaction,
+                indication = ripple(color = Color.White.copy(alpha = 0.4f)),
+                onClick = onClick,
+            )
+            .padding(vertical = 18.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Text(
             "Buy credits",
-            style = TextStyle(
-                brush = BuddyGradients.SilverText,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 16.sp,
-                letterSpacing = 0.4.sp,
-            ),
+            color = Color.White,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.4.sp,
         )
     }
 }

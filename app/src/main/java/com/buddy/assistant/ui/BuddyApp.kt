@@ -90,14 +90,6 @@ fun BuddyApp(agentController: AgentController) {
                         }
                     }
                 },
-                onSignIn = {
-                    scope.launch {
-                        app.settingsRepository.setWelcomeSeen(true)
-                        navController.navigate("home") {
-                            popUpTo("welcome") { inclusive = true }
-                        }
-                    }
-                },
             )
         }
         composable("home") {

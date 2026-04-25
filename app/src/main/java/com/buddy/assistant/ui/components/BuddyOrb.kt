@@ -16,6 +16,8 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.platform.LocalView
+import android.view.ViewTreeObserver
 import com.buddy.assistant.data.AgentStatus
 import com.buddy.assistant.ui.theme.BuddyColors
 import kotlin.math.*
@@ -60,10 +62,27 @@ private fun ShaderOrb(status: AgentStatus, modifier: Modifier) {
     val shader = remember { RuntimeShader(OMNI_SHADER_SRC) }
     val brush = remember(shader) { ShaderBrush(shader) }
 
-    // Drive time from the frame clock — single-source, unbounded; feeds uTime.
+    // Track window focus — pause the frame loop during recents / snapshot
+    // transitions so the shader's GPU work doesn't compete with the system
+    // animation. Android sends onWindowFocusChanged(false) when Overview opens.
+    val view = LocalView.current
+    var hasWindowFocus by remember { mutableStateOf(view.hasWindowFocus()) }
+    DisposableEffect(view) {
+        val listener = ViewTreeObserver.OnWindowFocusChangeListener { focused ->
+            hasWindowFocus = focused
+        }
+        view.viewTreeObserver.addOnWindowFocusChangeListener(listener)
+        onDispose {
+            view.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
+        }
+    }
+
+    // Drive time from the frame clock — single-source; feeds uTime. Only run
+    // while the window has focus so we don't chew GPU during transitions.
     var timeSec by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(Unit) {
-        val start = withFrameNanos { it }
+    LaunchedEffect(hasWindowFocus) {
+        if (!hasWindowFocus) return@LaunchedEffect
+        val start = withFrameNanos { it } - (timeSec * 1_000_000_000f).toLong()
         while (true) {
             withFrameNanos { now -> timeSec = (now - start) / 1_000_000_000f }
         }

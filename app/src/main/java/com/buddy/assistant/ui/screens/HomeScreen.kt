@@ -13,20 +13,27 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.buddy.assistant.R
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -178,7 +185,12 @@ private fun HomeTopBar(
             CreditPill(credits = credits, onClick = onCredits, onLongClick = onDebugOverlay)
             Spacer(Modifier.width(8.dp))
             IconButton(onClick = onSettings, modifier = Modifier.size(32.dp)) {
-                GradientIcon(Icons.Default.Settings, "Settings")
+                // DS 2.0 settings gear — Figma node 319:2, two-stop silver gradient.
+                Image(
+                    painter = painterResource(R.drawable.ic_settings),
+                    contentDescription = "Settings",
+                    modifier = Modifier.size(28.dp),
+                )
             }
         }
     }
@@ -214,41 +226,41 @@ private fun CreditPill(credits: Int, onClick: () -> Unit, onLongClick: () -> Uni
 
 // ─── Idle ───────────────────────────────────────────────────────────────────
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun IdleLayout(status: AgentStatus) {
-    // DS 2.0 idle: orb centered with two-line prompt below. We drive size off
-    // the available height so the group stays centered and fully visible even
-    // when the keyboard is open and the weight(1f) slot is compressed.
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val compact = maxHeight < 440.dp
-        val orbSize = if (compact) (maxHeight * 0.45f).coerceAtMost(160.dp) else 200.dp
-        val gap = if (compact) 20.dp else 40.dp
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            BuddyOrb(status = status, modifier = Modifier.size(orbSize))
-            Spacer(Modifier.height(gap))
+    // DS 2.0 idle: orb centered with two-line prompt below. `compact` is a
+    // single boolean driven by IME visibility (target, not the per-frame
+    // animated inset) so we don't re-measure the shader orb on every keyboard
+    // animation frame — that was causing jank when the keyboard slides up.
+    val compact = WindowInsets.isImeVisible
+    val orbSize = if (compact) 140.dp else 200.dp
+    val gap = if (compact) 20.dp else 40.dp
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        BuddyOrb(status = status, modifier = Modifier.size(orbSize))
+        Spacer(Modifier.height(gap))
+        Text(
+            text = if (compact) "Ready when you are." else "Say \u201CHey Omni\u201D",
+            style = TextStyle(
+                brush = BuddyGradients.SilverText,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Light,
+                letterSpacing = 0.4.sp,
+            ),
+        )
+        if (!compact) {
+            Spacer(Modifier.height(6.dp))
             Text(
-                text = if (compact) "Ready when you are." else "Say \u201CHey Omni\u201D",
-                style = TextStyle(
-                    brush = BuddyGradients.SilverText,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Light,
-                    letterSpacing = 0.4.sp,
-                ),
+                text = "or tap the orb to speak",
+                color = BuddyColors.InkMute,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Light,
+                letterSpacing = 0.2.sp,
             )
-            if (!compact) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = "or tap the orb to speak",
-                    color = BuddyColors.InkMute,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Light,
-                    letterSpacing = 0.2.sp,
-                )
-            }
         }
     }
 }
@@ -524,42 +536,72 @@ private fun BottomArea(
 @Composable
 private fun TypeCommandBar(onMic: () -> Unit, onSubmit: (String) -> Unit) {
     var text by remember { mutableStateOf("") }
+    var isFocused by remember { mutableStateOf(false) }
+    val inputShape = BuddyShapes.Pill
+    val submitCommand = {
+        val command = text.trim()
+        if (command.isNotBlank()) {
+            onSubmit(command)
+            text = ""
+        }
+    }
+
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(BuddyShapes.Pill)
-            .background(BuddyColors.Surface.copy(alpha = 0.6f))
-            .border(1.dp, BuddyColors.InkGhost, BuddyShapes.Pill)
-            .padding(start = 22.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Bottom,
     ) {
-        Box(modifier = Modifier.weight(1f)) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .heightIn(min = 56.dp)
+                .shadow(
+                    elevation = if (isFocused) 14.dp else 0.dp,
+                    shape = inputShape,
+                    ambientColor = BuddyColors.BrandBlueGlow.copy(alpha = 0.35f),
+                    spotColor = BuddyColors.BrandBlueGlow.copy(alpha = 0.35f),
+                )
+                .clip(inputShape)
+                .background(BuddyGradients.DockPill)
+                .background(BuddyGradients.DockInnerShadow)
+                .border(
+                    width = if (isFocused) 1.5.dp else 1.dp,
+                    color = if (isFocused) BuddyColors.BrandBlueGlow else BuddyColors.Hairline,
+                    shape = inputShape,
+                )
+                .padding(horizontal = 22.dp, vertical = 16.dp),
+            contentAlignment = Alignment.TopStart,
+        ) {
             if (text.isEmpty()) {
                 Text(
-                    "Type a command\u2026",
-                    color = BuddyColors.InkMute,
+                    "Type a command...",
+                    color = Color(0xFFA3A6AE),
                     fontSize = 14.sp,
-                    fontWeight = FontWeight.Light,
+                    fontWeight = FontWeight.Normal,
+                    maxLines = 1,
                 )
             }
             BasicTextField(
                 value = text,
                 onValueChange = { text = it },
-                singleLine = true,
-                cursorBrush = SolidColor(BuddyColors.Accent),
-                textStyle = TextStyle(color = BuddyColors.Ink, fontSize = 14.sp),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                modifier = Modifier.fillMaxWidth(),
+                singleLine = false,
+                cursorBrush = SolidColor(BuddyColors.BrandBlueGlow),
+                textStyle = TextStyle(
+                    color = BuddyColors.Ink,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Normal,
+                ),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                keyboardActions = KeyboardActions.Default,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { isFocused = it.isFocused },
             )
         }
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(12.dp))
         MicFab(
             icon = if (text.isBlank()) Icons.Default.Mic else Icons.AutoMirrored.Filled.ArrowForward,
             onClick = {
-                if (text.isBlank()) onMic() else {
-                    onSubmit(text)
-                    text = ""
-                }
+                if (text.isBlank()) onMic() else submitCommand()
             },
         )
     }
@@ -567,13 +609,23 @@ private fun TypeCommandBar(onMic: () -> Unit, onSubmit: (String) -> Unit) {
 
 @Composable
 private fun MicFab(icon: ImageVector, onClick: () -> Unit) {
-    // DS 2.0: circular dock-pill FAB with silver-gradient icon.
-    OmniIconButton(onClick = onClick, size = 44.dp) {
-        GradientIcon(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(20.dp),
-        )
+    // DS 2.0: circular dock-pill FAB. The mic state uses the Figma vector
+    // drawable (silver gradient lifted from the source); the send state keeps
+    // the Material arrow tinted via the same brush for visual consistency.
+    OmniIconButton(onClick = onClick, size = 56.dp) {
+        if (icon == Icons.Default.Mic) {
+            Image(
+                painter = painterResource(R.drawable.ic_mic_small),
+                contentDescription = null,
+                modifier = Modifier.size(28.dp),
+            )
+        } else {
+            GradientIcon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(28.dp),
+            )
+        }
     }
 }
 

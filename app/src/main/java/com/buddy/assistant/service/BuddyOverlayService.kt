@@ -314,17 +314,14 @@ private fun OverlayPill(
     val statusText = when (status) {
         is AgentStatus.VoiceListening -> "Listening\u2026"
         is AgentStatus.Processing -> "Thinking\u2026"
-        is AgentStatus.Executing -> {
-            val s = status as AgentStatus.Executing
-            "Step ${s.step}/${s.maxSteps}"
-        }
-        is AgentStatus.Done -> {
-            val d = status as AgentStatus.Done
-            if (d.success) "Done!" else d.reason
-        }
+        is AgentStatus.Executing -> "Step ${status.step}/${status.maxSteps}"
+        is AgentStatus.Done -> if (status.success) "Done!" else status.reason
         is AgentStatus.Error -> "Error"
         else -> "Omni"
     }
+    // Figma overlay variants (257:4..257:42): Listening shows orb + status only
+    // (no Cancel). Thinking / Executing show orb + status + Cancel.
+    val showCancel = status is AgentStatus.Processing || status is AgentStatus.Executing
 
     Box(
         modifier = Modifier
@@ -370,30 +367,34 @@ private fun OverlayPill(
                 )
             }
 
-            // Stop button
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(BuddyColors.Surface.copy(alpha = 0.5f))
-                    .border(
-                        width = 1.dp,
-                        color = Color.White.copy(alpha = 0.08f),
-                        shape = RoundedCornerShape(10.dp),
-                    )
-                    .clickable {
-                        agentController.reset()
-                        onDismiss()
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                // Stop icon — small rounded square
+            // Cancel pill — text per Figma anatomy (256:11), only for active work
+            if (showCancel) {
                 Box(
                     modifier = Modifier
-                        .size(14.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(BuddyColors.InkDim)
-                )
+                        .clip(BuddyShapes.Pill)
+                        .background(BuddyColors.Surface.copy(alpha = 0.5f))
+                        .border(
+                            width = 1.dp,
+                            color = Color.White.copy(alpha = 0.08f),
+                            shape = BuddyShapes.Pill,
+                        )
+                        .clickable {
+                            agentController.reset()
+                            onDismiss()
+                        }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "Cancel",
+                        style = TextStyle(
+                            brush = BuddyGradients.SilverText,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 14.sp,
+                        ),
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }

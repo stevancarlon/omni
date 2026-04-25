@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DS 2.0 microphone (large) — Figma node 121:23. Silver vertical gradient
+     stroke. Used on the Setup · Microphone hero card. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="64dp"
+    android:height="64dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+    <path
+        android:pathData="M40 16C40 11.5817 36.4183 8 32 8C27.5817 8 24 11.5817 24 16V32C24 36.4183 27.5817 40 32 40C36.4183 40 40 36.4183 40 32V16Z"
+        android:strokeWidth="4">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="32" android:startY="8"
+                android:endX="32" android:endY="40">
+                <item android:offset="0" android:color="#FAFBFD"/>
+                <item android:offset="0.45" android:color="#E8EBF0"/>
+                <item android:offset="0.75" android:color="#AEB3BE"/>
+                <item android:offset="1" android:color="#6F7580"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M13.3333 29.3333C13.3333 34.284 15.3 39.032 18.8007 42.5327C22.3014 46.0333 27.0493 48 32 48C36.9507 48 41.6986 46.0333 45.1993 42.5327C48.7 39.032 50.6667 34.284 50.6667 29.3333"
+        android:strokeWidth="4"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="32" android:startY="29.3333"
+                android:endX="32" android:endY="48">
+                <item android:offset="0" android:color="#FAFBFD"/>
+                <item android:offset="0.45" android:color="#E8EBF0"/>
+                <item android:offset="0.75" android:color="#AEB3BE"/>
+                <item android:offset="1" android:color="#6F7580"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M32 48V56"
+        android:strokeWidth="4"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="32.5" android:startY="48"
+                android:endX="32.5" android:endY="56">
+                <item android:offset="0" android:color="#FAFBFD"/>
+                <item android:offset="0.45" android:color="#E8EBF0"/>
+                <item android:offset="0.75" android:color="#AEB3BE"/>
+                <item android:offset="1" android:color="#6F7580"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

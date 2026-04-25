@@ -1,38 +1,30 @@
 package com.buddy.assistant.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.buddy.assistant.data.AgentStatus
 import com.buddy.assistant.ui.components.BuddyOrb
 import com.buddy.assistant.ui.theme.BuddyColors
 import com.buddy.assistant.ui.theme.BuddyGradients
-import com.buddy.assistant.ui.theme.BuddyShapes
 import com.buddy.assistant.ui.theme.OmniButton
 
 /**
  * WelcomeScreen — Figma `1 · Welcome` (node 15:5).
  *
- * Iris orb + "Meet Buddy" display title + two-line description, pill CTA
- * "Get started", and a text "Sign in" link below it.
+ * Iris orb + "omni" silver wordmark + two-line description, pill CTA
+ * "Get started". No Sign in link per DS 2.0.
  */
 @Composable
 fun WelcomeScreen(
     onGetStarted: () -> Unit,
-    onSignIn: () -> Unit = {},
 ) {
     Box(
         modifier = Modifier
@@ -87,23 +79,6 @@ fun WelcomeScreen(
             Spacer(Modifier.weight(1f))
 
             GetStartedButton(onClick = onGetStarted)
-            Spacer(Modifier.height(18.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onSignIn() }
-                    .padding(vertical = 6.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    "Sign in",
-                    color = BuddyColors.InkDim,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = 0.5.sp,
-                    textAlign = TextAlign.Center,
-                )
-            }
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -129,14 +104,3 @@ private fun GetStartedButton(onClick: () -> Unit) {
     }
 }
 
-@Suppress("unused")
-@Composable
-private fun CircleDecoration() {
-    Box(
-        modifier = Modifier
-            .size(8.dp)
-            .clip(CircleShape)
-            .background(BuddyColors.Surface)
-            .border(1.dp, BuddyColors.InkGhost, CircleShape),
-    )
-}

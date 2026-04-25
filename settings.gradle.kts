@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Buddy"
+rootProject.name = "Omni"
 include(":app")

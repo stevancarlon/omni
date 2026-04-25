@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Permissions -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -14,31 +13,41 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE"
-        tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
-        tools:ignore="QueryAllPackagesPermission" />
+
+    <queries>
+        <!-- Resolve launchable apps for open_app action. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+
+        <!-- Resolve URLs for open_url action. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
 
     <application
-        android:name=".BuddyApplication"
+        android:name=".OmniApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Buddy">
+        android:theme="@style/Theme.Omni">
 
         <!-- Main Activity -->
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.Buddy"
+            android:theme="@style/Theme.Omni"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Make Buddy available as an assistant app -->
+            <!-- Make Omni available as an assistant app -->
             <intent-filter>
                 <action android:name="android.intent.action.ASSIST" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -51,7 +60,7 @@
 
         <!-- Accessibility Service - core of screen reading + action execution -->
         <service
-            android:name=".service.BuddyAccessibilityService"
+            android:name=".service.OmniAccessibilityService"
             android:exported="true"
             android:label="@string/accessibility_service_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
@@ -65,13 +74,13 @@
 
         <!-- Foreground service for always-on wake word listening -->
         <service
-            android:name=".service.BuddyListenerService"
+            android:name=".service.OmniListenerService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
         <!-- Floating overlay for assistant status -->
         <service
-            android:name=".service.BuddyOverlayService"
+            android:name=".service.OmniOverlayService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
@@ -93,7 +102,7 @@
             android:name=".receiver.TestCommandReceiver"
             android:exported="true">
             <intent-filter>
-                <action android:name="com.buddy.assistant.TEST_COMMAND" />
+                <action android:name="com.omni.assistant.TEST_COMMAND" />
             </intent-filter>
         </receiver>
 

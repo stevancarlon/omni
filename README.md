@@ -1,21 +1,21 @@
-# Buddy
+# Omni
 
 A voice-controlled AI assistant for Android that uses LLM-driven agents to interact with your phone on your behalf.
 
-Say **"Hey Buddy"** or tap **Start Listening**, speak a command, and Buddy will read your screen, decide what to do, and execute actions — tapping buttons, typing text, opening apps, scrolling, and more.
+Say **"Hey Omni"** or tap **Start Listening**, speak a command, and Omni will read your screen, decide what to do, and execute actions — tapping buttons, typing text, opening apps, scrolling, and more.
 
 ## How it works
 
-1. You give Buddy a goal (e.g. "open YouTube Music and play my liked songs")
-2. Buddy reads the screen using Android's Accessibility Service
+1. You give Omni a goal (e.g. "open YouTube Music and play my liked songs")
+2. Omni reads the screen using Android's Accessibility Service
 3. An LLM (Claude, OpenAI, or OpenRouter) decides what action to take
-4. Buddy executes the action (tap, type, swipe, etc.)
+4. Omni executes the action (tap, type, swipe, etc.)
 5. Steps 2-4 repeat until the goal is complete
 
 ## Setup
 
 1. Install the app on your Android device (minSdk 29 / Android 10+)
-2. Enable Buddy in **Settings → Accessibility → Installed apps**
+2. Enable Omni in **Settings → Accessibility → Installed apps**
 3. Add your LLM API key in the app's **Settings** screen
 4. Grant microphone permission when prompted
 

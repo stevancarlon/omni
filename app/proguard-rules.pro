@@ -3,11 +3,11 @@
 # proguardFiles setting in build.gradle.kts.
 
 # Keep accessibility service
--keep class com.buddy.assistant.service.BuddyAccessibilityService { *; }
+-keep class com.omni.assistant.service.OmniAccessibilityService { *; }
 
 # Keep data classes used with Gson
--keep class com.buddy.assistant.data.** { *; }
--keep class com.buddy.assistant.llm.LLMResponse { *; }
+-keep class com.omni.assistant.data.** { *; }
+-keep class com.omni.assistant.llm.LLMResponse { *; }
 
 # OkHttp
 -dontwarn okhttp3.**

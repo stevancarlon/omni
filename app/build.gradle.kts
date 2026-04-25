@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.buddy.assistant"
+    namespace = "com.omni.assistant"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.buddy.assistant"
+        applicationId = "com.omni.assistant"
         minSdk = 29
         targetSdk = 35
         versionCode = 1

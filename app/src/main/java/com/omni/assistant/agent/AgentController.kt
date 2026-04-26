@@ -17,6 +17,7 @@ class AgentController private constructor(private val app: OmniApplication) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val llmClient = LLMClient(app)
     private var agentJob: Job? = null
+    private var terminalResetJob: Job? = null
     private var tts: TextToSpeech? = null
 
     private val _status = MutableStateFlow<AgentStatus>(AgentStatus.Idle)
@@ -38,6 +39,7 @@ class AgentController private constructor(private val app: OmniApplication) {
     }
 
     fun onWakeWordDetected() {
+        cancelTerminalReset()
         _status.value = AgentStatus.VoiceListening
         _currentThink.value = ""
         showOverlay()
@@ -63,6 +65,7 @@ class AgentController private constructor(private val app: OmniApplication) {
     }
 
     fun onCommandReceived(command: String, candidates: List<String> = listOf(command)) {
+        cancelTerminalReset()
         addLog("User: $command")
         _currentThink.value = command
         showOverlay()
@@ -83,11 +86,13 @@ class AgentController private constructor(private val app: OmniApplication) {
     fun reset() {
         agentJob?.cancel()
         agentJob = null
+        cancelTerminalReset()
         _status.value = AgentStatus.Idle
     }
 
     /** Debug-only — force a status for visual QA of orb states. */
     fun debugSetStatus(status: AgentStatus) {
+        cancelTerminalReset()
         _status.value = status
     }
 
@@ -148,7 +153,7 @@ class AgentController private constructor(private val app: OmniApplication) {
 
             if (response.action is AgentAction.Done) {
                 val done = response.action as AgentAction.Done
-                _status.value = AgentStatus.Done(done.success, done.reason)
+                complete(done.success, done.reason)
                 addLog("Done: ${done.reason}")
                 speak(done.reason)
                 return
@@ -163,7 +168,7 @@ class AgentController private constructor(private val app: OmniApplication) {
             delay(400)
         }
 
-        _status.value = AgentStatus.Done(false, "Reached maximum steps ($maxSteps)")
+        complete(false, "Reached maximum steps ($maxSteps)")
         speak("I reached the step limit and couldn't complete the task.")
     }
 
@@ -175,7 +180,29 @@ class AgentController private constructor(private val app: OmniApplication) {
     }
 
     private fun fail(message: String) {
+        cancelTerminalReset()
         _status.value = AgentStatus.Error(message)
+        scheduleTerminalReset { _status.value is AgentStatus.Error }
+    }
+
+    private fun complete(success: Boolean, reason: String) {
+        cancelTerminalReset()
+        _status.value = AgentStatus.Done(success, reason)
+        scheduleTerminalReset { _status.value is AgentStatus.Done }
+    }
+
+    private fun scheduleTerminalReset(isStillTerminalState: () -> Boolean) {
+        terminalResetJob = scope.launch {
+            delay(TERMINAL_VISIBLE_MS)
+            if (isStillTerminalState()) {
+                _status.value = AgentStatus.Idle
+            }
+        }
+    }
+
+    private fun cancelTerminalReset() {
+        terminalResetJob?.cancel()
+        terminalResetJob = null
     }
 
     private suspend fun hasActiveSubscription(): Boolean {
@@ -217,6 +244,8 @@ class AgentController private constructor(private val app: OmniApplication) {
     }
 
     companion object {
+        private const val TERMINAL_VISIBLE_MS = 3000L
+
         @Volatile
         private var INSTANCE: AgentController? = null
 

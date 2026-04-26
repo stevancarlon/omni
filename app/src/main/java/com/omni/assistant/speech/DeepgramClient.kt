@@ -43,6 +43,7 @@ class DeepgramClient(
     private var ignoreUntil = 0L
     private var commandFinalizeJob: Job? = null
     private var emptyCommandFinals = 0
+    private var emptyWakeFinals = 0
 
     private val client = OkHttpClient.Builder()
         .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
@@ -104,6 +105,7 @@ class DeepgramClient(
         commandFinalizeJob = null
         commandTranscript.clear()
         emptyCommandFinals = 0
+        emptyWakeFinals = 0
         mode = newMode
         if (newMode == ListenMode.COMMAND) {
             commandModeStartTime = System.currentTimeMillis()
@@ -249,7 +251,16 @@ class DeepgramClient(
     }
 
     private fun handleEmptyResult(isFinal: Boolean, speechFinal: Boolean) {
-        if (mode != ListenMode.COMMAND || (!isFinal && !speechFinal)) return
+        if (!isFinal && !speechFinal) return
+
+        if (mode == ListenMode.WAKE_WORD) {
+            emptyWakeFinals += 1
+            Log.d(TAG, "Empty wake final count=$emptyWakeFinals")
+            if (emptyWakeFinals >= MAX_EMPTY_WAKE_FINALS) {
+                onError("Deepgram wake stream heard audio but returned no transcript")
+            }
+            return
+        }
 
         val elapsed = System.currentTimeMillis() - commandModeStartTime
         if (elapsed < MIN_COMMAND_LISTEN_MS) return
@@ -262,6 +273,7 @@ class DeepgramClient(
     }
 
     private fun handleWakeWordResult(transcript: String) {
+        emptyWakeFinals = 0
         onPartialResult(transcript)
         val normalized = transcript.lowercase().replace(Regex("[^a-z ]"), "").trim()
         if (normalized.contains(normalizedWakeWord)) {
@@ -324,6 +336,7 @@ class DeepgramClient(
         private const val MIN_COMMAND_LISTEN_MS = 2000L
         private const val COMMAND_FINALIZE_DEBOUNCE_MS = 900L
         private const val MAX_EMPTY_COMMAND_FINALS = 2
+        private const val MAX_EMPTY_WAKE_FINALS = 3
         private const val GAIN = 2
         private const val SOFT_KNEE = 24000  // start soft-clipping at ~73% of full scale
     }

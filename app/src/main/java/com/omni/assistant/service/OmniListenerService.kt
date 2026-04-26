@@ -71,15 +71,9 @@ class OmniListenerService : Service() {
                 ACTION_STOP_COMMAND -> {
                     isListeningForCommand = false
                     agentController.reset()
-                    if (useDeepgramForAll) {
-                        startOrSwitchDeepgram(ListenMode.WAKE_WORD)
-                        isListeningForWakeWord = true
-                        updateNotification("Listening for \"$cachedWakeWord\"...")
-                    } else {
-                        deepgramClient?.stop()
-                        deepgramClient = null
-                        startWakeWordListening()
-                    }
+                    deepgramClient?.stop()
+                    deepgramClient = null
+                    startWakeWordListening()
                 }
                 else -> startWakeWordListening()
             }
@@ -120,9 +114,9 @@ class OmniListenerService : Service() {
         isListeningForWakeWord = true
         isListeningForCommand = false
         updateNotification("Listening for \"$cachedWakeWord\"...")
-        speechRecognizer?.destroy()
-        speechRecognizer = null
-        startOrSwitchDeepgram(ListenMode.WAKE_WORD)
+        deepgramClient?.stop()
+        deepgramClient = null
+        startBuiltinRecognizer(wakeWordMode = true)
     }
 
     private fun startCommandListening() {
@@ -242,11 +236,7 @@ class OmniListenerService : Service() {
     }
 
     private fun createRecognizer(wakeWordMode: Boolean): SpeechRecognizer {
-        if (wakeWordMode && SpeechRecognizer.isOnDeviceRecognitionAvailable(this)) {
-            Log.d(TAG, "Using on-device recognizer for wake word")
-            return SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
-        }
-        if (cachedSpeechLanguage.isBlank() && SpeechRecognizer.isOnDeviceRecognitionAvailable(this)) {
+        if (!wakeWordMode && cachedSpeechLanguage.isBlank() && SpeechRecognizer.isOnDeviceRecognitionAvailable(this)) {
             Log.d(TAG, "Using on-device recognizer")
             return SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
         }
@@ -264,28 +254,41 @@ class OmniListenerService : Service() {
     private val speechCorrector: SpeechCorrector by lazy { SpeechCorrector(appNames) }
 
     private fun buildRecognizerIntent(wakeWordMode: Boolean): Intent {
-        val silenceMs = if (wakeWordMode) 3000L else 10000L
-        val partialSilenceMs = if (wakeWordMode) 2000L else 7000L
+        val silenceMs = if (wakeWordMode) 1500L else 10000L
+        val partialSilenceMs = if (wakeWordMode) 1000L else 7000L
         return Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, silenceMs)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, partialSilenceMs)
-            putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, appNames)
-            if (!wakeWordMode && cachedSpeechLanguage.isNotBlank()) {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, cachedSpeechLanguage)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, cachedSpeechLanguage)
+            val biasingStrings = if (wakeWordMode) {
+                listOf(cachedWakeWord, "hey omni", "omni", "hey homie")
+            } else {
+                appNames
             }
+            putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, ArrayList(biasingStrings))
+            val recognizerLanguage = cachedSpeechLanguage.ifBlank { "en-US" }
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, recognizerLanguage)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, recognizerLanguage)
         }
     }
 
     private inner class SpeechListener(private val wakeWordMode: Boolean) : RecognitionListener {
-        override fun onReadyForSpeech(params: Bundle?) {}
-        override fun onBeginningOfSpeech() {}
+        override fun onReadyForSpeech(params: Bundle?) {
+            Log.d(TAG, "Recognizer ready (wakeWord=$wakeWordMode)")
+        }
+
+        override fun onBeginningOfSpeech() {
+            Log.d(TAG, "Recognizer speech started (wakeWord=$wakeWordMode)")
+        }
+
         override fun onRmsChanged(rmsdB: Float) {}
         override fun onBufferReceived(buffer: ByteArray?) {}
-        override fun onEndOfSpeech() {}
+        override fun onEndOfSpeech() {
+            Log.d(TAG, "Recognizer speech ended (wakeWord=$wakeWordMode)")
+        }
+
         override fun onEvent(eventType: Int, params: Bundle?) {}
 
         override fun onError(error: Int) {
@@ -302,6 +305,7 @@ class OmniListenerService : Service() {
         override fun onResults(results: Bundle?) {
             val candidates = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: return
             val text = candidates.firstOrNull()?.lowercase() ?: return
+            Log.d(TAG, "Recognizer results (wakeWord=$wakeWordMode): ${candidates.joinToString(" | ")}")
 
             if (wakeWordMode) {
                 handleWakeWordResult(text)
@@ -314,8 +318,9 @@ class OmniListenerService : Service() {
             val partial = partialResults
                 ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 ?.firstOrNull()?.lowercase() ?: return
+            Log.d(TAG, "Recognizer partial (wakeWord=$wakeWordMode): $partial")
             if (wakeWordMode) {
-                if (partial.contains(cachedWakeWord)) speechRecognizer?.stopListening()
+                if (isWakeWordMatch(partial)) speechRecognizer?.stopListening()
             } else {
                 agentController.onTranscriptionUpdated(partial)
                 updateNotification("Hearing: \"$partial\"")
@@ -327,13 +332,23 @@ class OmniListenerService : Service() {
 
     private fun handleWakeWordResult(text: String) {
         scope.launch {
-            if (text.contains(cachedWakeWord)) {
+            if (isWakeWordMatch(text)) {
+                Log.d(TAG, "Wake word detected from recognizer: $text")
                 onWakeWordDetected()
             } else {
+                Log.d(TAG, "Wake word not matched: $text")
                 delay(100)
                 startBuiltinRecognizer(wakeWordMode = true)
             }
         }
+    }
+
+    private fun isWakeWordMatch(text: String): Boolean {
+        val normalizedText = text.lowercase().replace(Regex("[^a-z ]"), " ").replace(Regex("\\s+"), " ").trim()
+        val normalizedWake = cachedWakeWord.lowercase().replace(Regex("[^a-z ]"), " ").replace(Regex("\\s+"), " ").trim()
+        return normalizedText.contains(normalizedWake) ||
+            normalizedText.contains("hey omni") ||
+            normalizedText.contains("hey homie")
     }
 
     private fun handleCommandResult(text: String, candidates: List<String>) {

@@ -41,6 +41,8 @@ class DeepgramClient(
     private val normalizedWakeWord = wakeWord.lowercase().replace(Regex("[^a-z ]"), "").trim()
     private var commandModeStartTime = 0L
     private var ignoreUntil = 0L
+    private var commandFinalizeJob: Job? = null
+    private var emptyCommandFinals = 0
 
     private val client = OkHttpClient.Builder()
         .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
@@ -98,7 +100,10 @@ class DeepgramClient(
 
     fun switchMode(newMode: ListenMode) {
         Log.d(TAG, "Mode: $mode -> $newMode")
+        commandFinalizeJob?.cancel()
+        commandFinalizeJob = null
         commandTranscript.clear()
+        emptyCommandFinals = 0
         mode = newMode
         if (newMode == ListenMode.COMMAND) {
             commandModeStartTime = System.currentTimeMillis()
@@ -109,6 +114,8 @@ class DeepgramClient(
     fun stop() {
         wsOpen = false
         isRecording = false
+        commandFinalizeJob?.cancel()
+        commandFinalizeJob = null
         recordingJob?.cancel()
         recordingJob = null
         try { webSocket?.send("{\"type\": \"CloseStream\"}") } catch (_: Exception) {}
@@ -212,9 +219,13 @@ class DeepgramClient(
             val json = gson.fromJson(text, JsonObject::class.java)
             when (json.get("type")?.asString) {
                 "Results" -> {
-                    val transcript = extractTranscript(json) ?: return
                     val isFinal = json.get("is_final")?.asBoolean ?: false
                     val speechFinal = json.get("speech_final")?.asBoolean ?: false
+                    val transcript = extractTranscript(json)
+                    if (transcript.isNullOrBlank()) {
+                        handleEmptyResult(isFinal, speechFinal)
+                        return
+                    }
                     when (mode) {
                         ListenMode.WAKE_WORD -> handleWakeWordResult(transcript)
                         ListenMode.COMMAND -> handleCommandResult(transcript, isFinal, speechFinal)
@@ -234,7 +245,20 @@ class DeepgramClient(
         val alternatives = channel.getAsJsonArray("alternatives")
         if (alternatives == null || alternatives.size() == 0) return null
         val transcript = alternatives[0].asJsonObject.get("transcript")?.asString
-        return if (transcript.isNullOrBlank()) null else transcript
+        return transcript?.trim()
+    }
+
+    private fun handleEmptyResult(isFinal: Boolean, speechFinal: Boolean) {
+        if (mode != ListenMode.COMMAND || (!isFinal && !speechFinal)) return
+
+        val elapsed = System.currentTimeMillis() - commandModeStartTime
+        if (elapsed < MIN_COMMAND_LISTEN_MS) return
+
+        emptyCommandFinals += 1
+        Log.d(TAG, "Empty command final count=$emptyCommandFinals")
+        if (emptyCommandFinals >= MAX_EMPTY_COMMAND_FINALS) {
+            onError("Deepgram heard audio but returned no transcript")
+        }
     }
 
     private fun handleWakeWordResult(transcript: String) {
@@ -249,6 +273,8 @@ class DeepgramClient(
     private fun handleCommandResult(transcript: String, isFinal: Boolean, speechFinal: Boolean) {
         if (System.currentTimeMillis() < ignoreUntil) return
 
+        emptyCommandFinals = 0
+
         // Strip wake word if it leaked into the command
         val cleaned = transcript
             .replace(Regex("(?i)${Regex.escape(wakeWord)}"), "")
@@ -259,13 +285,26 @@ class DeepgramClient(
             Log.d(TAG, "Command final: $cleaned")
             commandTranscript.append(cleaned).append(" ")
             onFinalResult(cleaned)
+            scheduleCommandFinalize()
         } else {
             onPartialResult(cleaned)
         }
         if (speechFinal) finalizeCommand()
     }
 
+    private fun scheduleCommandFinalize() {
+        commandFinalizeJob?.cancel()
+        commandFinalizeJob = scope.launch {
+            val minListenRemaining = (MIN_COMMAND_LISTEN_MS - (System.currentTimeMillis() - commandModeStartTime))
+                .coerceAtLeast(0L)
+            delay(maxOf(COMMAND_FINALIZE_DEBOUNCE_MS, minListenRemaining))
+            finalizeCommand()
+        }
+    }
+
     private fun finalizeCommand() {
+        commandFinalizeJob?.cancel()
+        commandFinalizeJob = null
         val elapsed = System.currentTimeMillis() - commandModeStartTime
         if (elapsed < MIN_COMMAND_LISTEN_MS) {
             Log.d(TAG, "Ignoring early UtteranceEnd (${elapsed}ms < ${MIN_COMMAND_LISTEN_MS}ms)")
@@ -283,6 +322,8 @@ class DeepgramClient(
         private const val TAG = "DeepgramClient"
         private const val SAMPLE_RATE = 16000
         private const val MIN_COMMAND_LISTEN_MS = 2000L
+        private const val COMMAND_FINALIZE_DEBOUNCE_MS = 900L
+        private const val MAX_EMPTY_COMMAND_FINALS = 2
         private const val GAIN = 2
         private const val SOFT_KNEE = 24000  // start soft-clipping at ~73% of full scale
     }

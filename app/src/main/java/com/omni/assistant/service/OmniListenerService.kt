@@ -154,13 +154,13 @@ class OmniListenerService : Service() {
 
     private fun startOrSwitchDeepgram(mode: ListenMode) {
         val existing = deepgramClient
-        if (existing != null && existing.isConnected) {
+        if (mode == ListenMode.WAKE_WORD && existing != null && existing.isConnected) {
             Log.d(TAG, "Reusing Deepgram connection, switching to $mode")
             existing.switchMode(mode)
             return
         }
 
-        Log.d(TAG, "Creating backend-provisioned Deepgram connection for $mode")
+        Log.d(TAG, "Creating fresh backend-provisioned Deepgram connection for $mode")
         deepgramClient?.stop()
         deepgramClient = null
         val requestId = ++deepgramRequestId
@@ -213,6 +213,7 @@ class OmniListenerService : Service() {
                 onError = { error ->
                     Log.e(TAG, "Deepgram error: $error")
                     scope.launch {
+                        deepgramClient?.stop()
                         deepgramClient = null
                         if (isListeningForCommand) {
                             Log.d(TAG, "Falling back to built-in recognizer after Deepgram error")

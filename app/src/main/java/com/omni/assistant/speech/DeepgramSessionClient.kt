@@ -1,5 +1,6 @@
 package com.omni.assistant.speech
 
+import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.omni.assistant.OmniApplication
@@ -25,7 +26,7 @@ class DeepgramSessionClient(private val app: OmniApplication) {
     suspend fun create(language: String): DeepgramSession = withContext(Dispatchers.IO) {
         val backendUrl = app.settingsRepository.backendUrl.first().trimEnd('/')
         val authToken = app.settingsRepository.authToken.first()
-        val body = gson.toJson(mapOf("language" to language, "model" to "nova-3"))
+        val body = gson.toJson(mapOf("language" to language, "model" to "nova-2"))
 
         val request = Request.Builder()
             .url("$backendUrl/api/deepgram/token")
@@ -40,11 +41,18 @@ class DeepgramSessionClient(private val app: OmniApplication) {
             throw IOException("Speech session failed (${response.code}): ${responseBody.take(200)}")
         }
         val json = gson.fromJson(responseBody, JsonObject::class.java)
+        val url = json.get("url")?.asString ?: throw IOException("Speech session missing URL")
+        Log.d(TAG, "Deepgram session url=$url")
+
         DeepgramSession(
-            url = json.get("url")?.asString ?: throw IOException("Speech session missing URL"),
+            url = url,
             accessToken = json.get("access_token")?.asString
                 ?: json.get("token")?.asString
                 ?: throw IOException("Speech session missing token"),
         )
+    }
+
+    private companion object {
+        const val TAG = "DeepgramSession"
     }
 }

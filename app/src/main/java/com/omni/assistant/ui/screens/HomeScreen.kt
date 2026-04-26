@@ -128,7 +128,7 @@ fun HomeScreen(
                         status = status,
                         transcript = think,
                         onSettings = onNavigateToSettings,
-                        onMic = { activity?.startListenerService() },
+                        onMic = { activity?.stopCommandListening() },
                     )
                     Bucket.Thinking -> TaskLayout(
                         status = status,
@@ -183,7 +183,7 @@ private fun StateHeader(
     onSettings: () -> Unit,
     onDebugCycle: () -> Unit = {},
 ) {
-    Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp)) {
+    Box(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.align(Alignment.TopStart)) {
             Text(
                 text = title,

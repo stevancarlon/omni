@@ -29,6 +29,9 @@ class AgentController private constructor(private val app: OmniApplication) {
     private val _currentThink = MutableStateFlow("")
     val currentThink: StateFlow<String> = _currentThink.asStateFlow()
 
+    private val _speechLevel = MutableStateFlow(0f)
+    val speechLevel: StateFlow<Float> = _speechLevel.asStateFlow()
+
     init {
         tts = TextToSpeech(app) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -42,6 +45,7 @@ class AgentController private constructor(private val app: OmniApplication) {
         cancelTerminalReset()
         _status.value = AgentStatus.VoiceListening
         _currentThink.value = ""
+        _speechLevel.value = 0f
         showOverlay()
         playTone()
         scope.launch {
@@ -56,6 +60,10 @@ class AgentController private constructor(private val app: OmniApplication) {
         _currentThink.value = text
     }
 
+    fun onSpeechLevelChanged(level: Float) {
+        _speechLevel.value = level.coerceIn(0f, 1f)
+    }
+
     private fun playTone() {
         try {
             val toneGen = android.media.ToneGenerator(android.media.AudioManager.STREAM_MUSIC, 60)
@@ -68,6 +76,7 @@ class AgentController private constructor(private val app: OmniApplication) {
         cancelTerminalReset()
         addLog("User: $command")
         _currentThink.value = command
+        _speechLevel.value = 0f
         showOverlay()
         agentJob?.cancel()
         agentJob = scope.launch { runAgentLoop(command, candidates) }
@@ -88,6 +97,7 @@ class AgentController private constructor(private val app: OmniApplication) {
         agentJob = null
         cancelTerminalReset()
         _status.value = AgentStatus.Idle
+        _speechLevel.value = 0f
     }
 
     /** Debug-only — force a status for visual QA of orb states. */

@@ -73,6 +73,7 @@ class OmniOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
     private var overlayView: ComposeView? = null
     private var isRequested = false
     private var removeJob: Job? = null
+    private var terminalHideJob: Job? = null
     private lateinit var agentController: AgentController
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -103,6 +104,7 @@ class OmniOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         agentController = AgentController.getInstance(application as OmniApplication)
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         ProcessLifecycleOwner.get().lifecycle.addObserver(foregroundObserver)
+        observeTaskCompletion()
         scope.launch {
             OmniAccessibilityService.suspended.collect { isSuspended ->
                 if (isSuspended) {
@@ -122,13 +124,14 @@ class OmniOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
             ACTION_SHOW -> {
                 startAsForeground()
                 isRequested = true
+                terminalHideJob?.cancel()
+                terminalHideJob = null
                 // Only attach the view right now if the app is backgrounded;
                 // otherwise we'll attach from the lifecycle observer once it is.
                 val state = ProcessLifecycleOwner.get().lifecycle.currentState
                 if (!state.isAtLeast(Lifecycle.State.STARTED)) {
                     addOverlayView()
                 }
-                observeTaskCompletion()
             }
             ACTION_HIDE -> hideOverlay()
         }
@@ -178,6 +181,8 @@ class OmniOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         overlayView = null
         removeJob?.cancel()
         removeJob = null
+        terminalHideJob?.cancel()
+        terminalHideJob = null
         ProcessLifecycleOwner.get().lifecycle.removeObserver(foregroundObserver)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         scope.cancel()
@@ -271,14 +276,25 @@ class OmniOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         scope.launch {
             agentController.status.collect { status ->
                 if (status is AgentStatus.Done || status is AgentStatus.Error) {
-                    delay(3000)
-                    hideOverlay()
+                    terminalHideJob?.cancel()
+                    terminalHideJob = scope.launch {
+                        delay(TERMINAL_HIDE_DELAY_MS)
+                        val current = agentController.status.value
+                        if (current is AgentStatus.Done || current is AgentStatus.Error) {
+                            hideOverlay()
+                        }
+                    }
+                } else {
+                    terminalHideJob?.cancel()
+                    terminalHideJob = null
                 }
             }
         }
     }
 
     private fun hideOverlay() {
+        terminalHideJob?.cancel()
+        terminalHideJob = null
         isRequested = false
         // Play the exit animation, then tear down. stopForegroundAndSelf runs
         // onDestroy which cancels the scope, so we must defer it until after
@@ -292,6 +308,7 @@ class OmniOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         private const val NOTIFICATION_ID = 4242
         private const val OVERLAY_ENTER_DURATION_MS = 280
         private const val OVERLAY_EXIT_DURATION_MS = 220
+        private const val TERMINAL_HIDE_DELAY_MS = 3000L
     }
 }
 

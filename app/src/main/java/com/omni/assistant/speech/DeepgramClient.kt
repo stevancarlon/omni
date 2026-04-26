@@ -25,6 +25,8 @@ class DeepgramClient(
     private val onPartialResult: (String) -> Unit = {},
     private val onFinalResult: (String) -> Unit = {},
     private val onCommandComplete: (String) -> Unit = {},
+    private val onNoCommand: () -> Unit = {},
+    private val onAudioLevel: (Float) -> Unit = {},
     private val onError: (String) -> Unit
 ) {
 
@@ -38,12 +40,18 @@ class DeepgramClient(
 
     private var mode: ListenMode = ListenMode.WAKE_WORD
     private val commandTranscript = StringBuilder()
-    private val normalizedWakeWord = wakeWord.lowercase().replace(Regex("[^a-z ]"), "").trim()
+    private val normalizedWakeWords = listOf(
+        normalizePhrase(wakeWord),
+        normalizePhrase("hey omni"),
+        normalizePhrase("hey homie"),
+    ).filter { it.isNotBlank() }.distinct()
     private var commandModeStartTime = 0L
     private var ignoreUntil = 0L
     private var commandFinalizeJob: Job? = null
     private var emptyCommandFinals = 0
     private var emptyWakeFinals = 0
+    private var wakeDetected = false
+    private var noCommandReported = false
 
     private val client = OkHttpClient.Builder()
         .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
@@ -62,6 +70,8 @@ class DeepgramClient(
 
         mode = initialMode
         commandTranscript.clear()
+        noCommandReported = false
+        wakeDetected = initialMode != ListenMode.WAKE_WORD
         if (initialMode == ListenMode.COMMAND) {
             commandModeStartTime = System.currentTimeMillis()
             ignoreUntil = System.currentTimeMillis() + 150
@@ -80,7 +90,9 @@ class DeepgramClient(
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                Log.d(TAG, "WS message: ${text.take(200)}")
+                if (!text.contains("\"transcript\":\"\"")) {
+                    Log.d(TAG, "WS message: ${text.take(200)}")
+                }
                 handleMessage(text)
             }
 
@@ -106,6 +118,8 @@ class DeepgramClient(
         commandTranscript.clear()
         emptyCommandFinals = 0
         emptyWakeFinals = 0
+        noCommandReported = false
+        wakeDetected = newMode != ListenMode.WAKE_WORD
         mode = newMode
         if (newMode == ListenMode.COMMAND) {
             commandModeStartTime = System.currentTimeMillis()
@@ -169,6 +183,7 @@ class DeepgramClient(
             val buffer = ByteArray(bufferSize)
             var bytesSent = 0L
             var lastLogMs = 0L
+            var lastLevelMs = 0L
             while (isRecording && isActive) {
                 val read = audioRecord?.read(buffer, 0, buffer.size) ?: -1
                 if (read > 0) {
@@ -204,6 +219,10 @@ class DeepgramClient(
                     val sent = webSocket?.send(buffer.copyOf(read).toByteString()) ?: false
                     if (sent) bytesSent += read
                     val now = System.currentTimeMillis()
+                    if (mode == ListenMode.COMMAND && now - lastLevelMs > AUDIO_LEVEL_INTERVAL_MS) {
+                        lastLevelMs = now
+                        onAudioLevel((peak / 32767f).coerceIn(0f, 1f))
+                    }
                     if (now - lastLogMs > 3000) {
                         lastLogMs = now
                         Log.d(TAG, "Audio: ${bytesSent / 1024}KB sent, ws=${wsOpen}, peak=$peak/32767 (x${GAIN}, clipped=${clippedSamples})")
@@ -268,18 +287,31 @@ class DeepgramClient(
         emptyCommandFinals += 1
         Log.d(TAG, "Empty command final count=$emptyCommandFinals")
         if (emptyCommandFinals >= MAX_EMPTY_COMMAND_FINALS) {
-            onError("Deepgram heard audio but returned no transcript")
+            reportNoCommandIfReady()
         }
     }
 
     private fun handleWakeWordResult(transcript: String) {
         emptyWakeFinals = 0
         onPartialResult(transcript)
-        val normalized = transcript.lowercase().replace(Regex("[^a-z ]"), "").trim()
-        if (normalized.contains(normalizedWakeWord)) {
+        if (!wakeDetected && isWakeWordMatch(transcript)) {
+            wakeDetected = true
             Log.d(TAG, "Wake word detected: \"$transcript\"")
             onWakeWordDetected()
         }
+    }
+
+    private fun isWakeWordMatch(text: String): Boolean {
+        val normalized = normalizePhrase(text)
+        return normalizedWakeWords.any { normalized.contains(it) }
+    }
+
+    private fun normalizePhrase(text: String): String {
+        return text
+            .lowercase()
+            .replace(Regex("[^a-z ]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
     }
 
     private fun handleCommandResult(transcript: String, isFinal: Boolean, speechFinal: Boolean) {
@@ -291,7 +323,10 @@ class DeepgramClient(
         val cleaned = transcript
             .replace(Regex("(?i)${Regex.escape(wakeWord)}"), "")
             .trim()
-        if (cleaned.isBlank()) return
+        if (cleaned.isBlank() || isOnlyWakePhrase(transcript)) {
+            if (isFinal || speechFinal) reportNoCommandIfReady()
+            return
+        }
 
         if (isFinal || speechFinal) {
             Log.d(TAG, "Command final: $cleaned")
@@ -327,7 +362,31 @@ class DeepgramClient(
         if (full.isNotBlank()) {
             Log.d(TAG, "Command complete: $full")
             onCommandComplete(full)
+        } else {
+            reportNoCommandIfReady()
         }
+    }
+
+    private fun reportNoCommandIfReady() {
+        if (noCommandReported) return
+        val elapsed = System.currentTimeMillis() - commandModeStartTime
+        if (elapsed < MIN_COMMAND_LISTEN_MS) {
+            commandFinalizeJob?.cancel()
+            commandFinalizeJob = scope.launch {
+                delay(MIN_COMMAND_LISTEN_MS - elapsed)
+                reportNoCommandIfReady()
+            }
+            return
+        }
+        noCommandReported = true
+        commandTranscript.clear()
+        Log.d(TAG, "No command captured")
+        onNoCommand()
+    }
+
+    private fun isOnlyWakePhrase(text: String): Boolean {
+        val normalized = normalizePhrase(text)
+        return normalizedWakeWords.any { normalized == it }
     }
 
     companion object {
@@ -335,6 +394,7 @@ class DeepgramClient(
         private const val SAMPLE_RATE = 16000
         private const val MIN_COMMAND_LISTEN_MS = 2000L
         private const val COMMAND_FINALIZE_DEBOUNCE_MS = 900L
+        private const val AUDIO_LEVEL_INTERVAL_MS = 50L
         private const val MAX_EMPTY_COMMAND_FINALS = 2
         private const val MAX_EMPTY_WAKE_FINALS = 3
         private const val GAIN = 2

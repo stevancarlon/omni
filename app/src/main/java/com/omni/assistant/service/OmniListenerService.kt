@@ -33,7 +33,11 @@ class OmniListenerService : Service() {
     private var isListeningForCommand = false
     private var startedFromWakeWord = false
     private var useDeepgramForAll = false
+    private var wakeWordEnabled = true
+    private var speechProvider = "deepgram"
     private var deepgramRequestId = 0
+    private var activeCommandId = 0
+    private var returnToWakeJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private lateinit var agentController: AgentController
 
@@ -59,20 +63,22 @@ class OmniListenerService : Service() {
             reloadSettings()
             when (intent?.action) {
                 ACTION_START_COMMAND_LISTENING -> {
+                    cancelReturnToWake()
                     startedFromWakeWord = false
                     agentController.onWakeWordDetected()
                     startCommandListening()
                 }
                 ACTION_START_WAKE_WORD -> {
+                    cancelReturnToWake()
                     startedFromWakeWord = true
                     startWakeWordListening()
                 }
                 ACTION_STOP -> shutdown()
                 ACTION_STOP_COMMAND -> {
+                    cancelReturnToWake()
+                    activeCommandId += 1
                     isListeningForCommand = false
                     agentController.reset()
-                    deepgramClient?.stop()
-                    deepgramClient = null
                     startWakeWordListening()
                 }
                 else -> startWakeWordListening()
@@ -87,6 +93,7 @@ class OmniListenerService : Service() {
         super.onDestroy()
         wakeLock?.release()
         wakeLock = null
+        returnToWakeJob?.cancel()
         speechRecognizer?.destroy()
         deepgramClient?.stop()
         scope.cancel()
@@ -98,28 +105,50 @@ class OmniListenerService : Service() {
         val repo = (application as OmniApplication).settingsRepository
         cachedSpeechLanguage = repo.speechLanguage.first()
         cachedWakeWord = repo.wakeWord.first().lowercase()
-        useDeepgramForAll = repo.authToken.first().isNotBlank()
-        Log.d(TAG, "Settings: backendSpeech=${useDeepgramForAll}, lang=$cachedSpeechLanguage, wake=$cachedWakeWord")
+        wakeWordEnabled = repo.wakeWordEnabled.first()
+        speechProvider = repo.speechProvider.first().lowercase()
+        useDeepgramForAll = repo.authToken.first().isNotBlank() && speechProvider == "deepgram"
+        Log.d(
+            TAG,
+            "Settings: backendSpeech=$useDeepgramForAll, provider=$speechProvider, wakeEnabled=$wakeWordEnabled, lang=$cachedSpeechLanguage, wake=$cachedWakeWord"
+        )
     }
 
     // ─── Listening Modes ─────────────────────────────────────────────────────
 
     private fun startWakeWordListening() {
-        if (!useDeepgramForAll) {
-            Log.d(TAG, "Skipping wake word until signed in. Use Start Listening button instead.")
-            updateNotification("Sign in to enable wake word")
+        if (!wakeWordEnabled) {
+            Log.d(TAG, "Wake word disabled in settings")
+            updateNotification("Wake word disabled")
             isListeningForWakeWord = false
+            isListeningForCommand = false
+            speechRecognizer?.destroy()
+            speechRecognizer = null
+            deepgramClient?.stop()
+            deepgramClient = null
+            return
+        }
+        if (!useDeepgramForAll) {
+            Log.d(TAG, "Skipping wake word until Deepgram speech is available. Use Start Listening button instead.")
+            updateNotification("Deepgram required for wake word")
+            isListeningForWakeWord = false
+            isListeningForCommand = false
+            speechRecognizer?.destroy()
+            speechRecognizer = null
+            deepgramClient?.stop()
+            deepgramClient = null
             return
         }
         isListeningForWakeWord = true
         isListeningForCommand = false
         updateNotification("Listening for \"$cachedWakeWord\"...")
-        deepgramClient?.stop()
-        deepgramClient = null
-        startBuiltinRecognizer(wakeWordMode = true)
+        speechRecognizer?.destroy()
+        speechRecognizer = null
+        startOrSwitchDeepgram(ListenMode.WAKE_WORD)
     }
 
     private fun startCommandListening() {
+        cancelReturnToWake()
         isListeningForWakeWord = false
         isListeningForCommand = true
         updateNotification("Listening... speak your command")
@@ -134,6 +163,7 @@ class OmniListenerService : Service() {
     }
 
     private fun shutdown() {
+        cancelReturnToWake()
         isListeningForWakeWord = false
         isListeningForCommand = false
         speechRecognizer?.destroy()
@@ -202,6 +232,16 @@ class OmniListenerService : Service() {
                         if (isListeningForCommand) {
                             handleCommandResult(fullText.lowercase(), listOf(fullText.lowercase()))
                         }
+                    }
+                },
+                onNoCommand = {
+                    scope.launch {
+                        if (isListeningForCommand) handleNoCommand()
+                    }
+                },
+                onAudioLevel = { level ->
+                    scope.launch {
+                        if (isListeningForCommand) agentController.onSpeechLevelChanged(level)
                     }
                 },
                 onError = { error ->
@@ -283,7 +323,12 @@ class OmniListenerService : Service() {
             Log.d(TAG, "Recognizer speech started (wakeWord=$wakeWordMode)")
         }
 
-        override fun onRmsChanged(rmsdB: Float) {}
+        override fun onRmsChanged(rmsdB: Float) {
+            if (!wakeWordMode && isListeningForCommand) {
+                val level = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
+                agentController.onSpeechLevelChanged(level)
+            }
+        }
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() {
             Log.d(TAG, "Recognizer speech ended (wakeWord=$wakeWordMode)")
@@ -354,6 +399,9 @@ class OmniListenerService : Service() {
     private fun handleCommandResult(text: String, candidates: List<String>) {
         val stopWords = listOf("stop omni", "stop, omni", "para omni", "pare omni")
         if (stopWords.any { text.contains(it) }) {
+            cancelReturnToWake()
+            activeCommandId += 1
+            isListeningForCommand = false
             agentController.reset()
             startWakeWordListening()
             return
@@ -364,6 +412,15 @@ class OmniListenerService : Service() {
         Log.d(TAG, "Command: $corrected (raw: $text)")
         isListeningForCommand = false
         onCommandReceived(corrected, correctedCandidates)
+    }
+
+    private fun handleNoCommand() {
+        Log.d(TAG, "No command captured, returning to wake word listening")
+        activeCommandId += 1
+        isListeningForCommand = false
+        agentController.reset()
+        updateNotification("No command heard")
+        startWakeWordListening()
     }
 
     // ─── Callbacks ───────────────────────────────────────────────────────────
@@ -393,11 +450,24 @@ class OmniListenerService : Service() {
 
     private fun onCommandReceived(command: String, candidates: List<String> = listOf(command)) {
         updateNotification("Processing: \"$command\"")
+        val commandId = ++activeCommandId
+        cancelReturnToWake()
         agentController.onCommandReceived(command, candidates)
-        scope.launch {
-            agentController.status.first { it is AgentStatus.Idle || it is AgentStatus.Done || it is AgentStatus.Error }
-            // Always return to wake word listening after task completes
-            startWakeWordListening()
+        returnToWakeJob = scope.launch {
+            var sawAgentRun = false
+            withTimeoutOrNull(AGENT_RETURN_TO_WAKE_TIMEOUT_MS) {
+                agentController.status.first { status ->
+                    if (status is AgentStatus.Processing || status is AgentStatus.Executing) {
+                        sawAgentRun = true
+                    }
+                    status is AgentStatus.Done ||
+                        status is AgentStatus.Error ||
+                        (sawAgentRun && status is AgentStatus.Idle)
+                }
+            }
+            if (commandId == activeCommandId && !isListeningForCommand) {
+                startWakeWordListening()
+            }
         }
     }
 
@@ -433,8 +503,14 @@ class OmniListenerService : Service() {
             .notify(NOTIF_ID, buildNotification(text))
     }
 
+    private fun cancelReturnToWake() {
+        returnToWakeJob?.cancel()
+        returnToWakeJob = null
+    }
+
     companion object {
         private const val TAG = "OmniListener"
+        private const val AGENT_RETURN_TO_WAKE_TIMEOUT_MS = 10 * 60 * 1000L
         const val NOTIF_ID = 1001
         const val ACTION_START_COMMAND_LISTENING = "com.omni.START_COMMAND"
         const val ACTION_START_WAKE_WORD = "com.omni.START_WAKE_WORD"

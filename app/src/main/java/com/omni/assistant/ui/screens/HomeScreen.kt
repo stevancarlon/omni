@@ -1,6 +1,12 @@
 package com.omni.assistant.ui.screens
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -58,6 +64,8 @@ import com.omni.assistant.ui.theme.OmniTextMetrics
 import com.omni.assistant.ui.theme.GradientIcon
 import com.omni.assistant.ui.theme.OmniIconButton
 import com.omni.assistant.ui.theme.dockPillStyle
+import kotlin.math.PI
+import kotlin.math.sin
 
 /**
  * HomeScreen — reproduces Figma `06 · Screens` frames 15:43 (Home Idle),
@@ -75,6 +83,7 @@ fun HomeScreen(
     val status by agentController.status.collectAsState()
     val log by agentController.log.collectAsState()
     val think by agentController.currentThink.collectAsState()
+    val speechLevel by agentController.speechLevel.collectAsState()
     val context = LocalContext.current
     val activity = context as? MainActivity
     val app = context.applicationContext as OmniApplication
@@ -127,6 +136,7 @@ fun HomeScreen(
                     Bucket.Listening -> ListeningLayout(
                         status = status,
                         transcript = think,
+                        speechLevel = speechLevel,
                         onSettings = onNavigateToSettings,
                         onMic = { activity?.stopCommandListening() },
                     )
@@ -406,6 +416,7 @@ private fun SubscriptionCard(active: Boolean, onClick: () -> Unit) {
 private fun ListeningLayout(
     status: AgentStatus,
     transcript: String,
+    speechLevel: Float,
     onSettings: () -> Unit,
     onMic: () -> Unit,
 ) {
@@ -427,7 +438,11 @@ private fun ListeningLayout(
             performance = OmniOrbPerformance.Full,
         )
         Spacer(Modifier.height(0.dp))
-        TranscriptCard(transcript)
+        TranscriptCard(
+            text = transcript,
+            speechLevel = speechLevel,
+            waveformActive = status is AgentStatus.VoiceListening,
+        )
         Spacer(Modifier.weight(1f))
         GlowingMicButton(onClick = onMic, enabled = true)
         Spacer(Modifier.height(36.dp))
@@ -435,7 +450,12 @@ private fun ListeningLayout(
 }
 
 @Composable
-private fun TranscriptCard(text: String, label: String = "You said") {
+private fun TranscriptCard(
+    text: String,
+    label: String = "You said",
+    speechLevel: Float = 0f,
+    waveformActive: Boolean = false,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -472,19 +492,51 @@ private fun TranscriptCard(text: String, label: String = "You said") {
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        WaveformBars(modifier = Modifier.align(Alignment.CenterHorizontally))
+        WaveformBars(
+            level = speechLevel,
+            active = waveformActive,
+            modifier = Modifier.align(Alignment.CenterHorizontally),
+        )
     }
 }
 
 @Composable
-private fun WaveformBars(modifier: Modifier = Modifier) {
-    val heights = listOf(18, 24, 14, 30, 18, 10, 12, 8, 20, 24, 22, 26)
+private fun WaveformBars(
+    level: Float,
+    active: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val transition = rememberInfiniteTransition(label = "speech-waveform")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 560, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "speech-waveform-phase",
+    )
+    val gatedLevel = if (active) ((level - 0.12f) / 0.88f).coerceIn(0f, 1f) else 0f
+    val animatedLevel by animateFloatAsState(
+        targetValue = gatedLevel,
+        animationSpec = tween(durationMillis = 70),
+        label = "speech-waveform-level",
+    )
+    val baseHeights = listOf(18, 24, 14, 30, 18, 10, 12, 20, 28, 29, 28)
     Row(
         modifier = modifier.height(34.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        heights.forEach { height ->
+        baseHeights.forEachIndexed { index, baseHeight ->
+            val wave = ((sin((phase * 2f * PI + index * 0.78f)).toFloat() + 1f) / 2f)
+            val isSpeaking = animatedLevel > 0.01f
+            val speechMotion = if (isSpeaking) animatedLevel * (0.55f + wave * 0.65f) else 0f
+            val height = if (isSpeaking) {
+                (baseHeight * (0.35f + speechMotion)).coerceIn(7f, 32f)
+            } else {
+                4f
+            }
             Box(
                 Modifier
                     .width(3.dp)
@@ -565,8 +617,12 @@ private fun TaskLayout(
         )
         Spacer(Modifier.height(if (executing != null) 18.dp else 30.dp))
         if (executing != null) {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                OmniOrb(status = status, modifier = Modifier.size(116.dp), performance = OmniOrbPerformance.Full)
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Image(
+                    painter = painterResource(R.drawable.omni_orb_executing),
+                    contentDescription = null,
+                    modifier = Modifier.size(120.dp),
+                )
             }
             Spacer(Modifier.height(22.dp))
             ActionCard(
@@ -683,16 +739,22 @@ private fun ProgressBar(progress: Float) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(6.dp)
-            .clip(RoundedCornerShape(3.dp))
-            .background(OmniColors.Surface.copy(alpha = 0.6f)),
+            .height(4.dp)
+            .clip(RoundedCornerShape(2.dp))
+            .background(Color(0xFF1A1B20)),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth(progress.coerceIn(0f, 1f))
                 .fillMaxHeight()
-                .clip(RoundedCornerShape(3.dp))
-                .background(OmniGradients.iris()),
+                .shadow(
+                    elevation = 8.dp,
+                    shape = RoundedCornerShape(2.dp),
+                    ambientColor = OmniColors.BrandBlueGlow.copy(alpha = 0.5f),
+                    spotColor = OmniColors.BrandBlueGlow.copy(alpha = 0.5f),
+                )
+                .clip(RoundedCornerShape(2.dp))
+                .background(OmniGradients.PrimaryBlue),
         )
     }
 }

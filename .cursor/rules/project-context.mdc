@@ -1,0 +1,33 @@
+---
+description: Core Omni Android project context and conventions
+alwaysApply: true
+---
+
+# Omni Android Project Context
+
+Omni is a voice-controlled Android assistant. Users trigger it with a wake word, speak a command, and the agent loop reads the current screen through accessibility APIs, calls an LLM, and executes UI actions until the task is complete.
+
+## Build And Stack
+
+- Build debug APK with `./gradlew assembleDebug`; install with `./gradlew installDebug`; run lint with `./gradlew lint`.
+- Single Android app module using Gradle KTS and the version catalog at `gradle/libs.versions.toml`.
+- Package is `com.omni.assistant`; minSdk 29, targetSdk 35, compileSdk 35.
+- Kotlin-only codebase with Jetpack Compose, Material 3 dark theme, Navigation Compose, OkHttp, Gson, DataStore Preferences, Coroutines, StateFlow, and Accompanist Permissions.
+- There is currently no test suite.
+
+## Architecture
+
+- `agent/AgentController.kt` owns the core loop: read screen, call LLM, execute action, repeat.
+- `service/OmniAccessibilityService.kt` reads the accessibility node tree and performs gestures, taps, swipes, and typing.
+- `service/OmniListenerService.kt` handles wake word detection and speech recognition as a foreground service.
+- `llm/LLMClient.kt` handles direct Claude, OpenAI, and OpenRouter calls and keeps the last 10 conversation turns.
+- `data/SettingsRepository.kt` stores settings in DataStore with Flow-based APIs.
+- `data/AgentState.kt` defines the main sealed state and action models.
+
+## Conventions
+
+- Follow official Kotlin style, pure Compose UI, and no XML layouts.
+- Prefer the existing singleton and `StateFlow` patterns before introducing new architecture.
+- Use suspend functions and coroutine scopes with `SupervisorJob` for async work.
+- Keep screen descriptions capped at 4000 characters, accessibility traversal depth capped at 10, and activity logs capped at 100 entries.
+- Keep changes scoped to the package layout: `agent/`, `data/`, `llm/`, `receiver/`, `service/`, and `ui/`.

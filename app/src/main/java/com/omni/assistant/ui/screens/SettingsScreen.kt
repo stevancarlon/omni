@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +26,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -48,14 +51,17 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
- * SettingsScreen — Figma `7 · Settings` (node 47:2).
+ * SettingsScreen — Buddy / Omni Settings (Figma node 243:3).
  *
- * Dark gradient background, display-small "Settings" title, accent-colored
- * section labels, pill-shaped provider chips with iris gradient when selected,
- * card-styled input rows, and custom iris-gradient toggles.
+ * Dark background, silver-gradient title, blue section labels, dark-metal
+ * settings cards, and compact blue/orange permission status controls.
  */
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onNavigateToPaywall: () -> Unit,
+    onSignedOut: () -> Unit,
+) {
     val context = LocalContext.current
     val app = context.applicationContext as OmniApplication
     val repo = app.settingsRepository
@@ -84,6 +90,13 @@ fun SettingsScreen(onBack: () -> Unit) {
     var ttsEnabled by remember { mutableStateOf(true) }
     var maxSteps by remember { mutableIntStateOf(30) }
     var speechLanguage by remember { mutableStateOf("") }
+    var languageSheetOpen by remember { mutableStateOf(false) }
+    var maxStepsSheetOpen by remember { mutableStateOf(false) }
+    val accountEmail by repo.accountEmail.collectAsState(initial = "")
+    val accountName by repo.accountName.collectAsState(initial = "")
+    val subscriptionStatus by repo.subscriptionStatus.collectAsState(initial = "inactive")
+    val subscriptionPlan by repo.subscriptionPlan.collectAsState(initial = "free")
+    var privacyDialogOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         wakeWordEnabled = repo.wakeWordEnabled.first()
@@ -103,11 +116,16 @@ fun SettingsScreen(onBack: () -> Unit) {
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.systemBars)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp)
+                .padding(horizontal = 14.dp)
         ) {
             Spacer(Modifier.height(8.dp))
             IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = OmniColors.Ink)
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = SettingsInk,
+                    modifier = Modifier.size(22.dp),
+                )
             }
 
             Spacer(Modifier.height(12.dp))
@@ -119,57 +137,45 @@ fun SettingsScreen(onBack: () -> Unit) {
                     fontSize = 40.sp,
                     letterSpacing = 0.5.sp,
                 ),
+                modifier = Modifier.padding(start = 13.dp),
             )
             Spacer(Modifier.height(8.dp))
             Text(
                 "Tune Omni to fit how you work.",
-                color = OmniColors.InkMute,
+                color = SettingsMuted,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Light,
+                modifier = Modifier.padding(start = 13.dp),
             )
 
-            // ─── Permissions ─────────────────────────────────────────────────
-            SectionLabel("PERMISSIONS")
+            val languages = languageOptions()
+            val selectedLanguageLabel = languages.firstOrNull { it.first == speechLanguage }?.second
+                ?: "System default"
+
+            // ─── Account ─────────────────────────────────────────────────────
+            SectionLabel("ACCOUNT")
             SettingsCard {
-                PermissionRow(
-                    title = "Accessibility",
-                    subtitle = "Read the screen, tap buttons.",
-                    granted = accessibilityGranted,
-                    onClick = {
-                        context.startActivity(
-                            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        )
-                    },
+                ProductRow(
+                    title = accountName.ifBlank { "Google account" },
+                    subtitle = accountEmail.ifBlank { "Signed in with Google" },
+                    onClick = {},
                 )
                 Divider()
-                PermissionRow(
-                    title = "Microphone",
-                    subtitle = "Hear \u201CHey Omni\u201D anytime.",
-                    granted = micGranted,
-                    onClick = {
-                        context.startActivity(
-                            Intent(
-                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                Uri.parse("package:${context.packageName}")
-                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        )
-                    },
+                ProductRow(
+                    title = "Plan",
+                    subtitle = if (subscriptionStatus == "active") "${subscriptionPlan.uppercase()} · active" else "Subscription inactive",
+                    trailing = if (subscriptionStatus == "active") "Manage" else "Upgrade",
+                    onClick = onNavigateToPaywall,
                 )
                 Divider()
-                PermissionRow(
-                    title = "Overlay",
-                    subtitle = "Show status over other apps.",
-                    granted = overlayGranted,
-                    onClick = {
-                        context.startActivity(
-                            Intent(
-                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                Uri.parse("package:${context.packageName}")
-                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        )
-                    },
+                ProductRow(
+                    title = "Privacy & data usage",
+                    subtitle = "Screen context, voice, and retention",
+                    onClick = { privacyDialogOpen = true },
                 )
+            }
+            if (privacyDialogOpen) {
+                PrivacyDialog(onDismiss = { privacyDialogOpen = false })
             }
 
             // ─── Wake Word ───────────────────────────────────────────────────
@@ -177,7 +183,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             SettingsCard {
                 ToggleRow(
                     title = "Enable wake word",
-                    subtitle = "Listen continuously for \"$wakeWord\"",
+                    subtitle = "Listen for \"$wakeWord\"",
                     checked = wakeWordEnabled,
                     onChange = {
                         wakeWordEnabled = it
@@ -193,19 +199,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                         scope.launch { repo.setWakeWord(it) }
                     },
                 )
+                Divider()
+                SelectorRow(
+                    label = "Language",
+                    value = selectedLanguageLabel,
+                    onClick = { languageSheetOpen = true },
+                )
             }
-
-            // ─── Speech ──────────────────────────────────────────────────────
-            SectionLabel("SPEECH")
-            val languages = languageOptions()
-            val selectedLanguageLabel = languages.firstOrNull { it.first == speechLanguage }?.second
-                ?: "System Default"
-            var languageSheetOpen by remember { mutableStateOf(false) }
-            SelectorCard(
-                title = "Language",
-                value = selectedLanguageLabel,
-                onClick = { languageSheetOpen = true },
-            )
             if (languageSheetOpen) {
                 OptionPickerSheet(
                     title = "Recognition Language",
@@ -233,24 +233,84 @@ fun SettingsScreen(onBack: () -> Unit) {
                     },
                 )
                 Divider()
-                StepperRow(
+                ValueRow(
                     title = "Max agent steps",
-                    subtitle = "Cap the number of actions per task",
                     value = maxSteps,
-                    onChange = {
-                        maxSteps = it
-                        scope.launch { repo.setMaxSteps(it) }
+                    onClick = { maxStepsSheetOpen = true },
+                )
+            }
+            if (maxStepsSheetOpen) {
+                OptionPickerSheet(
+                    title = "Max Agent Steps",
+                    options = (5..80 step 5).map { it.toString() to it.toString() },
+                    current = maxSteps.toString(),
+                    onSelect = {
+                        maxSteps = it.toInt()
+                        scope.launch { repo.setMaxSteps(maxSteps) }
+                        maxStepsSheetOpen = false
                     },
-                    min = 5,
-                    max = 80,
-                    step = 5,
+                    onDismiss = { maxStepsSheetOpen = false },
                 )
             }
 
-            Spacer(Modifier.height(36.dp))
+            // ─── Permissions ─────────────────────────────────────────────────
+            SectionLabel("PERMISSIONS")
+            SettingsCard {
+                PermissionRow(
+                    title = "Accessibility",
+                    subtitle = "Read the screen, tap buttons",
+                    granted = accessibilityGranted,
+                    onClick = {
+                        context.startActivity(
+                            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    },
+                )
+                Divider()
+                PermissionRow(
+                    title = "Microphone",
+                    subtitle = "Hear \u201CHey Omni\u201D anytime",
+                    granted = micGranted,
+                    onClick = {
+                        context.startActivity(
+                            Intent(
+                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.parse("package:${context.packageName}")
+                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    },
+                )
+                Divider()
+                PermissionRow(
+                    title = "Overlay",
+                    subtitle = "Show status over other apps",
+                    granted = overlayGranted,
+                    onClick = {
+                        context.startActivity(
+                            Intent(
+                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                Uri.parse("package:${context.packageName}")
+                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    },
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
+            SignOutFooter(
+                onClick = {
+                    scope.launch {
+                        runCatching { app.authRepository.logout() }
+                        repo.clearAccountSession()
+                        onSignedOut()
+                    }
+                },
+            )
+            Spacer(Modifier.height(28.dp))
             Text(
                 "Omni v0.1",
-                color = OmniColors.InkMute,
+                color = SettingsMuted,
                 fontSize = 11.sp,
                 letterSpacing = OmniTextMetrics.CapsTightSp,
                 fontWeight = FontWeight.Medium,
@@ -261,17 +321,59 @@ fun SettingsScreen(onBack: () -> Unit) {
     }
 }
 
+@Composable
+private fun PrivacyDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF101114),
+        title = {
+            Text("Privacy & data", color = SettingsInk, fontWeight = FontWeight.SemiBold)
+        },
+        text = {
+            Text(
+                "Omni sends screen context and your command to the Omni backend only when you ask it to act. Provider API keys stay on the backend. Voice sessions use short-lived backend-issued speech tokens.",
+                color = SettingsMuted,
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+            )
+        },
+        confirmButton = {
+            Text(
+                "Done",
+                color = OmniColors.BrandBlueGlow,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .clickable { onDismiss() }
+                    .padding(12.dp),
+            )
+        },
+    )
+}
+
 // ─── Section label ──────────────────────────────────────────────────────────
+
+private val SettingsInk = Color(0xFFE9ECF2)
+private val SettingsMuted = Color(0xFFA7ADBC)
+private val SettingsDivider = Color(0xFF282A35)
+private val SettingsChevron = Color(0xFF6B6E76)
+private val SettingsOrange = Color(0xFFFF8957)
+private val SettingsBlueStatus = Brush.horizontalGradient(
+    colors = listOf(Color(0xFF1E3B6E), OmniColors.BrandBlueGlow),
+)
+private val SettingsOrangeStatus = Brush.horizontalGradient(
+    colors = listOf(Color(0xFF85462C), SettingsOrange),
+)
 
 @Composable
 private fun SectionLabel(text: String) {
     Spacer(Modifier.height(28.dp))
     Text(
         text,
-        color = OmniColors.Accent,
+        color = OmniColors.BrandBlue,
         fontSize = 10.sp,
         fontWeight = FontWeight.SemiBold,
-        letterSpacing = OmniTextMetrics.CapsTightSp,
+        letterSpacing = 1.5.sp,
+        modifier = Modifier.padding(start = 1.dp),
     )
     Spacer(Modifier.height(12.dp))
 }
@@ -283,9 +385,13 @@ private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(OmniShapes.CardLg)
-            .background(OmniColors.Surface.copy(alpha = 0.55f))
-            .border(1.dp, OmniColors.InkGhost, OmniShapes.CardLg),
+            .shadow(
+                elevation = 12.dp,
+                shape = OmniShapes.Card,
+                ambientColor = Color.Black.copy(alpha = 0.70f),
+                spotColor = Color.Black.copy(alpha = 0.70f),
+            )
+            .dockPillStyle(OmniShapes.Card),
         content = content,
     )
 }
@@ -297,11 +403,75 @@ private fun Divider() {
             .fillMaxWidth()
             .padding(horizontal = 20.dp)
             .height(1.dp)
-            .background(OmniColors.InkGhost),
+            .background(SettingsDivider),
     )
 }
 
 // ─── Rows ───────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ProductRow(
+    title: String,
+    subtitle: String,
+    trailing: String? = null,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = SettingsInk, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(3.dp))
+            Text(subtitle, color = SettingsMuted, fontSize = 12.sp, fontWeight = FontWeight.Light)
+        }
+        if (trailing != null) {
+            Spacer(Modifier.width(12.dp))
+            Text(
+                trailing,
+                color = SettingsMuted,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Light,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Icon(
+            Icons.Default.ChevronRight,
+            contentDescription = null,
+            tint = SettingsChevron,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+@Composable
+private fun SignOutFooter(onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 12.dp,
+                shape = OmniShapes.Card,
+                ambientColor = Color.Black.copy(alpha = 0.70f),
+                spotColor = Color.Black.copy(alpha = 0.70f),
+            )
+            .dockPillStyle(OmniShapes.Card)
+            .clickable { onClick() }
+            .padding(horizontal = 20.dp, vertical = 13.dp),
+    ) {
+        Text("Sign out", color = SettingsOrange, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(3.dp))
+        Text(
+            "Remove this account from Omni",
+            color = SettingsMuted,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Light,
+        )
+    }
+}
 
 @Composable
 private fun TextInputRow(
@@ -312,19 +482,19 @@ private fun TextInputRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .padding(horizontal = 20.dp, vertical = 10.dp),
     ) {
-        Text(label, color = OmniColors.InkMute, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = SettingsMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(4.dp))
         BasicTextField(
             value = value,
             onValueChange = onChange,
             textStyle = TextStyle(
-                color = OmniColors.Ink,
+                color = SettingsInk,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Light,
             ),
-            cursorBrush = SolidColor(OmniColors.Accent),
+            cursorBrush = SolidColor(OmniColors.BrandBlue),
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -342,21 +512,21 @@ private fun PermissionRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() }
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = OmniColors.Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(title, color = SettingsInk, fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(2.dp))
-            Text(subtitle, color = OmniColors.InkMute, fontSize = 12.sp, fontWeight = FontWeight.Light)
+            Text(subtitle, color = SettingsMuted, fontSize = 12.sp, fontWeight = FontWeight.Light)
         }
         Spacer(Modifier.width(12.dp))
         PermissionStatus(granted = granted)
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(10.dp))
         Icon(
             Icons.Default.ChevronRight,
             contentDescription = null,
-            tint = OmniColors.InkMute,
+            tint = SettingsChevron,
             modifier = Modifier.size(20.dp),
         )
     }
@@ -364,33 +534,37 @@ private fun PermissionRow(
 
 @Composable
 private fun PermissionStatus(granted: Boolean) {
-    if (granted) {
-        Box(
-            modifier = Modifier
-                .size(24.dp)
-                .clip(CircleShape)
-                .background(OmniColors.Success),
-            contentAlignment = Alignment.Center,
-        ) {
+    val glow = if (granted) OmniColors.BrandBlueGlow else SettingsOrange
+    Box(
+        modifier = Modifier
+            .size(21.dp)
+            .shadow(
+                elevation = 10.dp,
+                shape = CircleShape,
+                ambientColor = glow.copy(alpha = 0.45f),
+                spotColor = glow.copy(alpha = 0.45f),
+            )
+            .clip(CircleShape)
+            .background(if (granted) SettingsBlueStatus else SettingsOrangeStatus),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (granted) {
             Icon(
                 Icons.Default.Check,
                 contentDescription = "Granted",
-                tint = OmniColors.Ink,
-                modifier = Modifier.size(14.dp),
+                tint = SettingsInk,
+                modifier = Modifier.size(13.dp),
+            )
+        } else {
+            Text(
+                "!",
+                style = TextStyle(
+                    brush = OmniGradients.SilverText,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                ),
             )
         }
-    } else {
-        Text(
-            "Grant",
-            color = OmniColors.Accent,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = 0.3.sp,
-            modifier = Modifier
-                .clip(OmniShapes.Pill)
-                .border(1.dp, OmniColors.Accent.copy(alpha = 0.5f), OmniShapes.Pill)
-                .padding(horizontal = 10.dp, vertical = 5.dp),
-        )
     }
 }
 
@@ -405,17 +579,68 @@ private fun ToggleRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onChange(!checked) }
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(horizontal = 20.dp, vertical = 15.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = OmniColors.Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(title, color = SettingsInk, fontSize = 15.sp, fontWeight = FontWeight.Medium)
             if (subtitle != null) {
                 Spacer(Modifier.height(2.dp))
-                Text(subtitle, color = OmniColors.InkMute, fontSize = 12.sp, fontWeight = FontWeight.Light)
+                Text(subtitle, color = SettingsMuted, fontSize = 12.sp, fontWeight = FontWeight.Light)
             }
         }
         OmniToggle(checked = checked, onChange = onChange)
+    }
+}
+
+@Composable
+private fun SelectorRow(
+    label: String,
+    value: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, color = SettingsMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(4.dp))
+            Text(value, color = SettingsInk, fontSize = 15.sp, fontWeight = FontWeight.Light)
+        }
+        Icon(
+            Icons.Default.ChevronRight,
+            contentDescription = null,
+            tint = SettingsChevron,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+@Composable
+private fun ValueRow(
+    title: String,
+    value: Int,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 20.dp, vertical = 15.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            title,
+            color = SettingsInk,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f),
+        )
+        Text("$value", color = SettingsInk, fontSize = 16.sp, fontWeight = FontWeight.Medium)
     }
 }
 

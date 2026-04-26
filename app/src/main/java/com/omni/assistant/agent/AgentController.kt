@@ -42,6 +42,16 @@ class AgentController private constructor(private val app: OmniApplication) {
         _currentThink.value = ""
         showOverlay()
         playTone()
+        scope.launch {
+            if (!hasActiveSubscription()) {
+                fail("Subscription required. Please upgrade to use Omni.")
+                return@launch
+            }
+        }
+    }
+
+    fun onTranscriptionUpdated(text: String) {
+        _currentThink.value = text
     }
 
     private fun playTone() {
@@ -84,6 +94,12 @@ class AgentController private constructor(private val app: OmniApplication) {
     // ─── Agent Loop ──────────────────────────────────────────────────────────
 
     private suspend fun runAgentLoop(goal: String, voiceCandidates: List<String> = listOf(goal)) {
+        if (!hasActiveSubscription()) {
+            fail("Subscription required. Please upgrade to use Omni.")
+            speak("Please upgrade to use Omni.")
+            return
+        }
+
         val service = OmniAccessibilityService.instance
         if (service == null) {
             fail("Accessibility service not enabled. Please enable Omni in Accessibility Settings.")
@@ -160,6 +176,28 @@ class AgentController private constructor(private val app: OmniApplication) {
 
     private fun fail(message: String) {
         _status.value = AgentStatus.Error(message)
+    }
+
+    private suspend fun hasActiveSubscription(): Boolean {
+        val authToken = app.settingsRepository.authToken.first()
+        if (authToken.isBlank()) return false
+
+        runCatching { app.authRepository.refreshSession() }
+            .onSuccess { session ->
+                app.settingsRepository.setAccountSession(
+                    authToken = session.authToken,
+                    email = session.email,
+                    name = session.name,
+                    subscriptionStatus = session.subscriptionStatus,
+                    subscriptionPlan = session.subscriptionPlan,
+                )
+            }
+            .onFailure {
+                addLog("Subscription refresh failed: ${it.message}")
+            }
+
+        return app.settingsRepository.subscriptionStatus.first() == "active" &&
+            app.settingsRepository.subscriptionPlan.first() != "free"
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────

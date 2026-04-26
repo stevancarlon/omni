@@ -42,6 +42,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omni.assistant.OmniApplication
@@ -61,7 +62,7 @@ import com.omni.assistant.ui.theme.dockPillStyle
 /**
  * HomeScreen — reproduces Figma `06 · Screens` frames 15:43 (Home Idle),
  * 15:65 (Listening), 15:82 (Thinking). Layout is state-driven: the top
- * chrome (omni title + credit pill) stays, the middle morphs based on
+ * chrome stays, the middle morphs based on
  * [AgentStatus], and the bottom switches between the type-command bar
  * (idle) and contextual actions (cancel / stop).
  */
@@ -69,8 +70,7 @@ import com.omni.assistant.ui.theme.dockPillStyle
 fun HomeScreen(
     agentController: AgentController,
     onNavigateToSettings: () -> Unit,
-    onNavigateToSetup: () -> Unit,
-    onNavigateToCredits: () -> Unit = {},
+    onNavigateToPaywall: () -> Unit = {},
 ) {
     val status by agentController.status.collectAsState()
     val log by agentController.log.collectAsState()
@@ -78,7 +78,7 @@ fun HomeScreen(
     val context = LocalContext.current
     val activity = context as? MainActivity
     val app = context.applicationContext as OmniApplication
-    val credits by app.settingsRepository.creditsBalance.collectAsState(initial = 0)
+    val subscriptionStatus by app.settingsRepository.subscriptionStatus.collectAsState(initial = "inactive")
 
     // Debug: long-press the "omni" wordmark to cycle through orb states
     // so we can visually QA each one without a live LLM run.
@@ -103,19 +103,6 @@ fun HomeScreen(
                 .windowInsetsPadding(WindowInsets.systemBars)
                 .imePadding()
         ) {
-            Spacer(Modifier.height(16.dp))
-            HomeTopBar(
-                credits = credits,
-                onSetup = onNavigateToSetup,
-                onSettings = onNavigateToSettings,
-                onCredits = onNavigateToCredits,
-                onDebugCycle = {
-                    debugIdx = (debugIdx + 1) % debugCycle.size
-                    agentController.debugSetStatus(debugCycle[debugIdx])
-                },
-                onDebugOverlay = { activity?.debugToggleOverlay() },
-            )
-
             AnimatedContent(
                 targetState = stateBucket(status),
                 transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(180)) },
@@ -123,16 +110,51 @@ fun HomeScreen(
                 modifier = Modifier.weight(1f)
             ) { bucket ->
                 when (bucket) {
-                    Bucket.Idle -> IdleLayout(status)
-                    Bucket.Listening -> ListeningLayout(status, think)
-                    Bucket.Thinking -> ThinkingLayout(status, log)
-                    Bucket.Speaking -> SpeakingLayout(status)
-                    Bucket.Done -> DoneLayout(status)
-                    Bucket.Error -> ErrorLayout(status, activity)
+                    Bucket.Idle -> IdleLayout(
+                        status,
+                        subscriptionActive = subscriptionStatus == "active",
+                        onUpgrade = onNavigateToPaywall,
+                        onSettings = onNavigateToSettings,
+                        onMic = { activity?.startListenerService() },
+                        onSubmit = { text ->
+                            if (text.isNotBlank()) agentController.onCommandReceived(text)
+                        },
+                        onDebugCycle = {
+                            debugIdx = (debugIdx + 1) % debugCycle.size
+                            agentController.debugSetStatus(debugCycle[debugIdx])
+                        },
+                    )
+                    Bucket.Listening -> ListeningLayout(
+                        status = status,
+                        transcript = think,
+                        onSettings = onNavigateToSettings,
+                        onMic = { activity?.startListenerService() },
+                    )
+                    Bucket.Thinking -> TaskLayout(
+                        status = status,
+                        log = log,
+                        onSettings = onNavigateToSettings,
+                        onStop = { agentController.reset() },
+                    )
+                    Bucket.Speaking -> SpeakingLayout(status, onNavigateToSettings)
+                    Bucket.Done -> DoneLayout(
+                        status = status,
+                        onSettings = onNavigateToSettings,
+                        onMic = { activity?.startListenerService() },
+                        onSubmit = { text ->
+                            if (text.isNotBlank()) agentController.onCommandReceived(text)
+                        },
+                    )
+                    Bucket.Error -> ErrorLayout(
+                        status = status,
+                        onSettings = onNavigateToSettings,
+                        onMic = { activity?.startListenerService() },
+                        onSubmit = { text ->
+                            if (text.isNotBlank()) agentController.onCommandReceived(text)
+                        },
+                    )
                 }
             }
-
-            BottomArea(status, activity, agentController)
         }
     }
 }
@@ -150,20 +172,52 @@ private fun stateBucket(status: AgentStatus): Bucket = when (status) {
     is AgentStatus.Error -> Bucket.Error
 }
 
-// ─── Top bar ────────────────────────────────────────────────────────────────
+// ─── Header / shared state chrome ────────────────────────────────────────────
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun HomeTopBar(
-    credits: Int,
-    onSetup: () -> Unit,
+private fun StateHeader(
+    title: String,
+    chip: String,
+    chipColor: Color,
     onSettings: () -> Unit,
-    onCredits: () -> Unit,
     onDebugCycle: () -> Unit = {},
-    onDebugOverlay: () -> Unit = {},
 ) {
+    Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp)) {
+        Column(modifier = Modifier.align(Alignment.TopStart)) {
+            Text(
+                text = title,
+                color = Color(0xFFE8EAEE),
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 32.sp,
+                lineHeight = 38.sp,
+                modifier = Modifier.combinedClickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null,
+                    onClick = {},
+                    onLongClick = onDebugCycle,
+                ),
+            )
+            Spacer(Modifier.height(12.dp))
+            StateChip(label = chip, color = chipColor)
+        }
+        IconButton(
+            onClick = onSettings,
+            modifier = Modifier.align(Alignment.TopEnd).size(32.dp),
+        ) {
+            Image(
+                painter = painterResource(R.drawable.ic_settings),
+                contentDescription = "Settings",
+                modifier = Modifier.size(28.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeTopBar(onSettings: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -175,53 +229,36 @@ private fun HomeTopBar(
                 fontSize = 22.sp,
                 letterSpacing = 3.sp,
             ),
-            modifier = Modifier.combinedClickable(
-                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                indication = null,
-                onClick = {},
-                onLongClick = onDebugCycle,
-            ),
         )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            CreditPill(credits = credits, onClick = onCredits, onLongClick = onDebugOverlay)
-            Spacer(Modifier.width(8.dp))
-            IconButton(onClick = onSettings, modifier = Modifier.size(32.dp)) {
-                // DS 2.0 settings gear — Figma node 319:2, two-stop silver gradient.
-                Image(
-                    painter = painterResource(R.drawable.ic_settings),
-                    contentDescription = "Settings",
-                    modifier = Modifier.size(28.dp),
-                )
-            }
+        IconButton(onClick = onSettings, modifier = Modifier.size(32.dp)) {
+            Image(
+                painter = painterResource(R.drawable.ic_settings),
+                contentDescription = "Settings",
+                modifier = Modifier.size(28.dp),
+            )
         }
     }
 }
 
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun CreditPill(credits: Int, onClick: () -> Unit, onLongClick: () -> Unit = {}) {
+private fun StateChip(label: String, color: Color) {
     Row(
         modifier = Modifier
+            .shadow(
+                elevation = 10.dp,
+                shape = OmniShapes.Pill,
+                ambientColor = color.copy(alpha = 0.28f),
+                spotColor = color.copy(alpha = 0.28f),
+            )
             .clip(OmniShapes.Pill)
-            .background(OmniColors.Surface.copy(alpha = 0.55f))
-            .border(1.dp, OmniColors.InkGhost, OmniShapes.Pill)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 10.dp, vertical = 5.dp),
+            .background(color.copy(alpha = 0.12f))
+            .border(1.dp, color.copy(alpha = 0.5f), OmniShapes.Pill)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(OmniColors.Success)
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(
-            "$credits cr",
-            color = OmniColors.InkDim,
-            fontSize = 11.sp,
-            letterSpacing = 0.5.sp,
-        )
+        Box(Modifier.size(6.dp).clip(CircleShape).background(color))
+        Spacer(Modifier.width(7.dp))
+        Text(label, color = color, fontSize = 11.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -229,7 +266,15 @@ private fun CreditPill(credits: Int, onClick: () -> Unit, onLongClick: () -> Uni
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun IdleLayout(status: AgentStatus) {
+private fun IdleLayout(
+    status: AgentStatus,
+    subscriptionActive: Boolean,
+    onUpgrade: () -> Unit,
+    onSettings: () -> Unit,
+    onMic: () -> Unit,
+    onSubmit: (String) -> Unit,
+    onDebugCycle: () -> Unit,
+) {
     // DS 2.0 idle: orb centered with two-line prompt below. `compact` is a
     // single boolean driven by IME visibility (target, not the per-frame
     // animated inset) so we don't re-measure the shader orb on every keyboard
@@ -238,10 +283,24 @@ private fun IdleLayout(status: AgentStatus) {
     val orbSize = if (compact) 140.dp else 200.dp
     val gap = if (compact) 20.dp else 40.dp
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
     ) {
+        Spacer(Modifier.height(56.dp))
+        StateHeader(
+            title = "Ready",
+            chip = "Idle",
+            chipColor = Color(0xFFA3A6AE),
+            onSettings = onSettings,
+            onDebugCycle = onDebugCycle,
+        )
+        if (!compact) {
+            Spacer(Modifier.height(18.dp))
+            SubscriptionCard(active = subscriptionActive, onClick = onUpgrade)
+        }
+        Spacer(Modifier.weight(1f))
         OmniOrb(
             status = status,
             modifier = Modifier.size(orbSize),
@@ -267,130 +326,355 @@ private fun IdleLayout(status: AgentStatus) {
                 letterSpacing = 0.2.sp,
             )
         }
+        Spacer(Modifier.weight(1f))
+        TypeCommandBar(
+            onMic = onMic,
+            onSubmit = onSubmit,
+        )
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun SubscriptionCard(active: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 16.dp,
+                shape = RoundedCornerShape(18.dp),
+                ambientColor = Color.Black.copy(alpha = 0.55f),
+                spotColor = Color.Black.copy(alpha = 0.55f),
+            )
+            .dockPillStyle(RoundedCornerShape(18.dp))
+            .clickable { onClick() }
+            .padding(start = 18.dp, top = 12.dp, end = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                if (active) "PLUS" else "PRO",
+                color = OmniColors.BrandBlueGlow,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 1.4.sp,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                if (active) "Subscription active" else "Upgrade for more agent runs",
+                color = OmniColors.Ink,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Row(
+            modifier = Modifier
+                .shadow(
+                    elevation = 12.dp,
+                    shape = OmniShapes.Pill,
+                    ambientColor = OmniColors.BrandBlueGlow.copy(alpha = 0.35f),
+                    spotColor = OmniColors.BrandBlueGlow.copy(alpha = 0.35f),
+                )
+                .clip(OmniShapes.Pill)
+                .background(OmniGradients.PrimaryBlue)
+                .border(1.dp, OmniColors.BrandBlueGlow.copy(alpha = 0.55f), OmniShapes.Pill)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (active) "Manage" else "Upgrade",
+                color = OmniColors.Ink,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                "›",
+                color = OmniColors.Ink,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Light,
+            )
+        }
     }
 }
 
 // ─── Listening ──────────────────────────────────────────────────────────────
 
 @Composable
-private fun ListeningLayout(status: AgentStatus, think: String) {
+private fun ListeningLayout(
+    status: AgentStatus,
+    transcript: String,
+    onSettings: () -> Unit,
+    onMic: () -> Unit,
+) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(20.dp))
-        Text(
-            "Listening\u2026",
-            style = MaterialTheme.typography.titleLarge.copy(
-                color = OmniColors.Ink,
-                fontWeight = FontWeight.Light,
-                letterSpacing = 1.sp,
-            ),
+        Spacer(Modifier.height(56.dp))
+        StateHeader(
+            title = "Listening",
+            chip = "Listening",
+            chipColor = Color(0xFF4FD39A),
+            onSettings = onSettings,
         )
+        Spacer(Modifier.height(30.dp))
+        OmniOrb(
+            status = AgentStatus.VoiceListening,
+            modifier = Modifier.size(300.dp),
+            performance = OmniOrbPerformance.Full,
+        )
+        Spacer(Modifier.height(0.dp))
+        TranscriptCard(transcript)
         Spacer(Modifier.weight(1f))
-        OmniOrb(status = status, modifier = Modifier.size(260.dp))
-        Spacer(Modifier.weight(1f))
-        TranscriptCard(think)
-        Spacer(Modifier.height(24.dp))
+        GlowingMicButton(onClick = onMic, enabled = true)
+        Spacer(Modifier.height(36.dp))
     }
 }
 
 @Composable
-private fun TranscriptCard(text: String) {
+private fun TranscriptCard(text: String, label: String = "You said") {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .height(174.dp)
+            .shadow(
+                elevation = 28.dp,
+                shape = OmniShapes.Card,
+                ambientColor = Color.Black.copy(alpha = 0.65f),
+                spotColor = Color.Black.copy(alpha = 0.65f),
+            )
             .clip(OmniShapes.Card)
-            .background(OmniColors.Surface.copy(alpha = 0.5f))
-            .border(1.dp, OmniColors.InkGhost, OmniShapes.Card)
+            .background(OmniGradients.DockPill)
+            .background(OmniGradients.DockInnerShadow)
+            .border(1.dp, OmniColors.Hairline, OmniShapes.Card)
             .padding(20.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(
-            "YOU SAID",
-            color = OmniColors.Accent,
-            fontSize = 10.sp,
-            letterSpacing = OmniTextMetrics.CapsTightSp,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(Modifier.height(10.dp))
-        Text(
-            text = if (text.isBlank()) "\u2026" else "\u201C$text\u201D",
-            color = OmniColors.Ink,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Light,
-            lineHeight = 22.sp,
-        )
+        Column {
+            Text(
+                label,
+                color = Color(0xFF6B6E76),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 1.2.sp,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = text.ifBlank { "..." },
+                color = Color(0xFFE8EAEE),
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                lineHeight = 20.sp,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        WaveformBars(modifier = Modifier.align(Alignment.CenterHorizontally))
+    }
+}
+
+@Composable
+private fun WaveformBars(modifier: Modifier = Modifier) {
+    val heights = listOf(18, 24, 14, 30, 18, 10, 12, 8, 20, 24, 22, 26)
+    Row(
+        modifier = modifier.height(34.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        heights.forEach { height ->
+            Box(
+                Modifier
+                    .width(3.dp)
+                    .height(height.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color(0xFF6EE7C1).copy(alpha = 0.72f))
+            )
+        }
+    }
+}
+
+@Composable
+private fun GlowingMicButton(onClick: () -> Unit, enabled: Boolean) {
+    Box(
+        modifier = Modifier
+            .size(76.dp)
+            .shadow(
+                elevation = if (enabled) 26.dp else 0.dp,
+                shape = CircleShape,
+                ambientColor = OmniColors.BrandBlueGlow.copy(alpha = if (enabled) 0.65f else 0f),
+                spotColor = OmniColors.BrandBlueGlow.copy(alpha = if (enabled) 0.65f else 0f),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(64.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF14161E).copy(alpha = if (enabled) 0.72f else 0.34f))
+                .border(
+                    1.dp,
+                    if (enabled) OmniColors.BrandBlueGlow else Color.White.copy(alpha = 0.16f),
+                    CircleShape,
+                )
+                .clickable(enabled = enabled) { onClick() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                painter = painterResource(R.drawable.ic_mic_small),
+                contentDescription = if (enabled) "Listen" else null,
+                modifier = Modifier.size(28.dp),
+            )
+        }
     }
 }
 
 // ─── Thinking / Executing ───────────────────────────────────────────────────
 
 @Composable
-private fun ThinkingLayout(status: AgentStatus, log: List<String>) {
+private fun TaskLayout(
+    status: AgentStatus,
+    log: List<String>,
+    onSettings: () -> Unit,
+    onStop: () -> Unit,
+) {
+    val executing = status as? AgentStatus.Executing
+    val processing = status as? AgentStatus.Processing
     val (stepNumber, maxSteps) = when (status) {
         is AgentStatus.Executing -> status.step to status.maxSteps
         else -> 1 to 1
     }
-    val headline = when (status) {
-        is AgentStatus.Executing -> status.lastAction.ifBlank { "Working\u2026" }
-        is AgentStatus.Processing -> "Thinking\u2026"
-        else -> "Working\u2026"
-    }
-    val subline = when (status) {
-        is AgentStatus.Processing -> status.goal
-        is AgentStatus.Executing -> "Towards: ${status.goal}"
-        else -> ""
-    }
+    val title = if (executing != null) "Executing" else "Thinking"
+    val chip = if (executing != null) "Acting on screen" else "Thinking"
+    val chipColor = if (executing != null) Color(0xFFFFD166) else OmniColors.BrandBlueGlow
+    val currentAction = executing?.lastAction?.ifBlank { "Working..." } ?: "Planning next step"
+    val goal = executing?.goal ?: processing?.goal.orEmpty()
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.Start,
+        modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(16.dp))
-        Text(
-            "RUNNING TASK",
-            color = OmniColors.Accent,
-            fontSize = 10.sp,
-            letterSpacing = OmniTextMetrics.CapsTightSp,
-            fontWeight = FontWeight.SemiBold,
+        Spacer(Modifier.height(56.dp))
+        StateHeader(
+            title = title,
+            chip = chip,
+            chipColor = chipColor,
+            onSettings = onSettings,
         )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "Step $stepNumber of $maxSteps",
-            color = OmniColors.InkDim,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Light,
-        )
-
-        Box(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            OmniOrb(status = status, modifier = Modifier.size(160.dp))
-        }
-
-        Text(
-            headline,
-            color = OmniColors.Ink,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Light,
-            lineHeight = 26.sp,
-        )
-        if (subline.isNotBlank()) {
-            Spacer(Modifier.height(6.dp))
-            Text(
-                subline,
-                color = OmniColors.InkMute,
-                fontSize = 13.sp,
-                lineHeight = 18.sp,
+        Spacer(Modifier.height(if (executing != null) 18.dp else 30.dp))
+        if (executing != null) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                OmniOrb(status = status, modifier = Modifier.size(116.dp), performance = OmniOrbPerformance.Full)
+            }
+            Spacer(Modifier.height(22.dp))
+            ActionCard(
+                action = currentAction,
+                goal = goal,
+                step = stepNumber,
+                maxSteps = maxSteps,
             )
+            Spacer(Modifier.height(18.dp))
+            ProgressBar(progress = stepNumber.toFloat() / maxSteps.coerceAtLeast(1))
+            Spacer(Modifier.height(22.dp))
+            StepList(log.takeLast(5))
+            Spacer(Modifier.weight(1f))
+            StopButton(onClick = onStop)
+            Spacer(Modifier.height(34.dp))
+        } else {
+            OmniOrb(status = status, modifier = Modifier.size(190.dp), performance = OmniOrbPerformance.Full)
+            Spacer(Modifier.height(46.dp))
+            ReasoningCard(log.takeLast(3), goal)
+            Spacer(Modifier.weight(1f))
+            GlowingMicButton(onClick = {}, enabled = false)
+            Spacer(Modifier.height(36.dp))
         }
+    }
+}
 
-        Spacer(Modifier.height(16.dp))
-        ProgressBar(progress = stepNumber.toFloat() / maxSteps.coerceAtLeast(1))
+@Composable
+private fun ReasoningCard(entries: List<String>, goal: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(174.dp)
+            .shadow(28.dp, OmniShapes.Card, ambientColor = Color.Black.copy(alpha = 0.65f), spotColor = Color.Black.copy(alpha = 0.65f))
+            .dockPillStyle(OmniShapes.Card)
+            .padding(20.dp),
+    ) {
+        Text(
+            "REASONING",
+            color = Color(0xFF6B6E76),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            letterSpacing = 1.2.sp,
+        )
+        Spacer(Modifier.height(12.dp))
+        val lines = entries.ifEmpty { listOf("Starting task: $goal") }
+        lines.forEach { entry ->
+            Text(
+                "• ${entry.substringAfter("] ")}",
+                color = Color(0xFFC9CDD6),
+                fontSize = 13.sp,
+                lineHeight = 20.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(6.dp))
+        }
+        Spacer(Modifier.weight(1f))
+        Text("•••", color = OmniColors.BrandBlueGlow, fontSize = 18.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+    }
+}
 
-        Spacer(Modifier.height(20.dp))
-        StepList(log.takeLast(5))
+@Composable
+private fun ActionCard(action: String, goal: String, step: Int, maxSteps: Int) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(28.dp, OmniShapes.Card, ambientColor = Color.Black.copy(alpha = 0.65f), spotColor = Color.Black.copy(alpha = 0.65f))
+            .dockPillStyle(OmniShapes.Card)
+            .padding(20.dp),
+    ) {
+        Text("TAP", color = Color(0xFFFFD166), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            action,
+            color = Color(0xFFE8EAEE),
+            fontSize = 18.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (goal.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(goal, color = Color(0xFFA3A6AE), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("Step $step of $maxSteps", color = Color(0xFF6B6E76), fontSize = 11.sp)
+    }
+}
+
+@Composable
+private fun StopButton(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 18.dp,
+                shape = OmniShapes.Pill,
+                ambientColor = OmniColors.Error.copy(alpha = 0.28f),
+                spotColor = OmniColors.Error.copy(alpha = 0.28f),
+            )
+            .clip(OmniShapes.Pill)
+            .background(OmniColors.Error.copy(alpha = 0.10f))
+            .border(1.dp, OmniColors.Error.copy(alpha = 0.45f), OmniShapes.Pill)
+            .clickable { onClick() }
+            .padding(vertical = 16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("Stop", color = OmniColors.Error, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -451,38 +735,62 @@ private fun StepList(entries: List<String>) {
 // ─── Speaking / Done / Error ────────────────────────────────────────────────
 
 @Composable
-private fun SpeakingLayout(status: AgentStatus) {
+private fun SpeakingLayout(status: AgentStatus, onSettings: () -> Unit) {
     val text = (status as? AgentStatus.Speaking)?.text ?: ""
-    CenteredCaption(status = status, caption = "\u201C$text\u201D", tone = OmniColors.AuroraPeach)
+    CenteredCaption(status = status, title = "Speaking", caption = "\u201C$text\u201D", tone = OmniColors.AuroraPeach, onSettings = onSettings)
 }
 
 @Composable
-private fun DoneLayout(status: AgentStatus) {
+private fun DoneLayout(
+    status: AgentStatus,
+    onSettings: () -> Unit,
+    onMic: () -> Unit,
+    onSubmit: (String) -> Unit,
+) {
     val done = status as? AgentStatus.Done
     val success = done?.success == true
     val tone = if (success) OmniColors.Success else OmniColors.Error
-    CenteredCaption(
+    ResultLayout(
         status = status,
         caption = if (success) "Done! ${done?.reason.orEmpty()}" else "Couldn\u2019t complete: ${done?.reason.orEmpty()}",
         tone = tone,
+        onSettings = onSettings,
+        onMic = onMic,
+        onSubmit = onSubmit,
     )
 }
 
 @Composable
-private fun ErrorLayout(status: AgentStatus, activity: MainActivity?) {
-    CenteredCaption(
+private fun ErrorLayout(
+    status: AgentStatus,
+    onSettings: () -> Unit,
+    onMic: () -> Unit,
+    onSubmit: (String) -> Unit,
+) {
+    ResultLayout(
         status = status,
         caption = (status as? AgentStatus.Error)?.message ?: "Something went wrong.",
         tone = OmniColors.Error,
+        onSettings = onSettings,
+        onMic = onMic,
+        onSubmit = onSubmit,
     )
 }
 
 @Composable
-private fun CenteredCaption(status: AgentStatus, caption: String, tone: Color) {
+private fun CenteredCaption(
+    status: AgentStatus,
+    title: String,
+    caption: String,
+    tone: Color,
+    onSettings: () -> Unit,
+) {
     Column(
         modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        Spacer(Modifier.height(56.dp))
+        StateHeader(title = title, chip = title, chipColor = tone, onSettings = onSettings)
         Spacer(Modifier.weight(1f))
         OmniOrb(
             status = status,
@@ -507,6 +815,52 @@ private fun CenteredCaption(status: AgentStatus, caption: String, tone: Color) {
                 .background(tone.copy(alpha = 0.7f))
         )
         Spacer(Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun ResultLayout(
+    status: AgentStatus,
+    caption: String,
+    tone: Color,
+    onSettings: () -> Unit,
+    onMic: () -> Unit,
+    onSubmit: (String) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
+        Spacer(Modifier.height(16.dp))
+        HomeTopBar(onSettings = onSettings)
+        Column(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Spacer(Modifier.weight(1f))
+            OmniOrb(
+                status = status,
+                modifier = Modifier.size(220.dp),
+                performance = OmniOrbPerformance.Static,
+            )
+            Spacer(Modifier.height(32.dp))
+            Text(
+                caption,
+                color = OmniColors.Ink,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Light,
+                textAlign = TextAlign.Center,
+                lineHeight = 24.sp,
+            )
+            Spacer(Modifier.height(12.dp))
+            Box(
+                Modifier
+                    .width(48.dp)
+                    .height(2.dp)
+                    .clip(RoundedCornerShape(1.dp))
+                    .background(tone.copy(alpha = 0.7f))
+            )
+            Spacer(Modifier.weight(1f))
+        }
+        TypeCommandBar(onMic = onMic, onSubmit = onSubmit)
+        Spacer(Modifier.height(24.dp))
     }
 }
 

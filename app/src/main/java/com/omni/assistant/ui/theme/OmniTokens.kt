@@ -87,7 +87,7 @@ object OmniColors {
 object OmniGradients {
     /**
      * Full-screen background. DS 2.0 is solid `#0A0A0C` on every screen
-     * (Welcome/Home/Setup/Settings/Credits). The `Brush` form is kept so
+     * (Welcome/Home/Setup/Settings/Paywall). The `Brush` form is kept so
      * existing callers don't break, but it paints a flat tone now.
      */
     val Background: Brush = Brush.verticalGradient(
@@ -185,7 +185,7 @@ object OmniGradients {
     )
 
     /**
-     * Blue gradient used on the Credits "Buy credits" primary action —
+     * Blue gradient used on the most prominent subscription action —
      * horizontal sweep deep navy `#1E3B6E → #6CB8FF`. Distinct from the dark
      * metal CTA used elsewhere; reserved for the single most prominent
      * monetary action in the app.
@@ -383,12 +383,11 @@ fun OmniIconButton(
 }
 
 /**
- * OmniToggle — DS 2.0 switch. When checked, the track uses the dock-pill
- * gradient (dark metal) with the inner bevel, matching the primary CTAs.
- * When unchecked, the track is a flat translucent surface with a hairline
- * border. The knob is a solid white circle with a soft drop shadow.
+ * OmniToggle — DS 2.0 switch. When checked, the track uses the blue wake-word
+ * gradient from the Settings design with a soft blue glow. When unchecked, it
+ * falls back to the dark-metal card surface.
  *
- * Dimensions mirror iOS/material toggles: 52×32 track, 26 knob, 3 padding.
+ * Dimensions mirror the Figma Settings control: 56×32 track, 22 knob, 5 padding.
  */
 @Composable
 fun OmniToggle(
@@ -396,10 +395,10 @@ fun OmniToggle(
     onChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val trackW = 52.dp
+    val trackW = 56.dp
     val trackH = 32.dp
-    val knobSize = 26.dp
-    val pad = 3.dp
+    val knobSize = 22.dp
+    val pad = 5.dp
     val knobOffset by animateDpAsState(
         targetValue = if (checked) trackW - knobSize - pad * 2 else 0.dp,
         animationSpec = tween(200),
@@ -410,12 +409,25 @@ fun OmniToggle(
             .size(width = trackW, height = trackH)
             .then(
                 if (checked) {
-                    Modifier.dockPillStyle(OmniShapes.Pill)
+                    Modifier
+                        .shadow(
+                            elevation = 16.dp,
+                            shape = OmniShapes.Pill,
+                            ambientColor = OmniColors.BrandBlueGlow.copy(alpha = 0.45f),
+                            spotColor = OmniColors.BrandBlueGlow.copy(alpha = 0.45f),
+                        )
+                        .clip(OmniShapes.Pill)
+                        .background(OmniGradients.PrimaryBlue)
+                        .border(1.dp, OmniColors.BrandBlueGlow.copy(alpha = 0.60f), OmniShapes.Pill)
                 } else {
                     Modifier
-                        .clip(OmniShapes.Pill)
-                        .background(Color.White.copy(alpha = 0.06f))
-                        .border(1.dp, Color.White.copy(alpha = 0.12f), OmniShapes.Pill)
+                        .shadow(
+                            elevation = 12.dp,
+                            shape = OmniShapes.Pill,
+                            ambientColor = Color.Black.copy(alpha = 0.45f),
+                            spotColor = Color.Black.copy(alpha = 0.45f),
+                        )
+                        .dockPillStyle(OmniShapes.Pill)
                 }
             )
             .clickable(
@@ -436,7 +448,7 @@ fun OmniToggle(
                     spotColor = Color.Black,
                 )
                 .clip(CircleShape)
-                .background(Color.White),
+                .background(OmniGradients.SilverText),
         )
     }
 }

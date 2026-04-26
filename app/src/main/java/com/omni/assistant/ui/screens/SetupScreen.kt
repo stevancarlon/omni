@@ -49,9 +49,8 @@ import com.omni.assistant.ui.theme.OmniButton
 import com.omni.assistant.ui.theme.dockPillStyle
 
 /**
- * SetupScreen — DS 2.0 three-step onboarding wizard. Faithful to Figma
- * `Setup · Microphone permission` / `Setup · Accessibility service` /
- * `Setup · Provider selection` (1/2/3 of 3).
+ * SetupScreen — DS 2.0 onboarding wizard for the post-Google permission flow:
+ * microphone, accessibility, then always-on-top overlay.
  *
  * Visual signatures driving the layout:
  *  - Pure `#0A0A0C` background
@@ -66,7 +65,7 @@ import com.omni.assistant.ui.theme.dockPillStyle
  *    verbatim from the Figma source — no Material Icons in this screen
  */
 @Composable
-fun SetupScreen(onBack: () -> Unit) {
+fun SetupScreen(onFinish: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -84,6 +83,7 @@ fun SetupScreen(onBack: () -> Unit) {
             PackageManager.PERMISSION_GRANTED
     }
     val accessibilityGranted = remember(tick) { OmniAccessibilityService.instance != null }
+    val overlayGranted = remember(tick) { Settings.canDrawOverlays(context) }
 
     var step by remember { mutableIntStateOf(0) }
 
@@ -108,7 +108,7 @@ fun SetupScreen(onBack: () -> Unit) {
 
             Box(modifier = Modifier.fillMaxWidth()) {
                 IconButton(
-                    onClick = { if (step == 0) onBack() else step -= 1 },
+                    onClick = { if (step == 0) onFinish() else step -= 1 },
                     modifier = Modifier
                         .size(40.dp)
                         .align(Alignment.CenterStart),
@@ -120,7 +120,7 @@ fun SetupScreen(onBack: () -> Unit) {
                     )
                 }
                 Text(
-                    "${step + 1} of 2",
+                    "${step + 1} of 3",
                     color = OmniColors.InkMute,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Light,
@@ -151,7 +151,7 @@ fun SetupScreen(onBack: () -> Unit) {
                         },
                         onSkip = { step = 1 },
                     )
-                    else -> AccessibilityStep(
+                    1 -> AccessibilityStep(
                         granted = accessibilityGranted,
                         onOpen = {
                             context.startActivity(
@@ -159,32 +159,21 @@ fun SetupScreen(onBack: () -> Unit) {
                                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             )
                         },
-                        onSkip = {
-                            if (!Settings.canDrawOverlays(context)) {
-                                runCatching {
-                                    context.startActivity(
-                                        Intent(
-                                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                            Uri.parse("package:${context.packageName}")
-                                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    )
-                                }
-                            }
-                            onBack()
+                        onSkip = { step = 2 },
+                        onContinue = { step = 2 },
+                    )
+                    else -> OverlayStep(
+                        granted = overlayGranted,
+                        onOpen = {
+                            context.startActivity(
+                                Intent(
+                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    Uri.parse("package:${context.packageName}")
+                                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
                         },
-                        onContinue = {
-                            if (!Settings.canDrawOverlays(context)) {
-                                runCatching {
-                                    context.startActivity(
-                                        Intent(
-                                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                            Uri.parse("package:${context.packageName}")
-                                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    )
-                                }
-                            }
-                            onBack()
-                        },
+                        onSkip = onFinish,
+                        onContinue = onFinish,
                     )
                 }
             }
@@ -202,7 +191,7 @@ private fun MicrophoneStep(
 ) {
     StepScaffold(
         title = "Microphone",
-        description = "Omni listens for your wake word. We never send raw audio off the device without your command.",
+        description = "Omni uses microphone access for commands and wake phrase after you sign in.",
         hero = {
             HeroCard {
                 Column(
@@ -218,7 +207,7 @@ private fun MicrophoneStep(
                     Spacer(Modifier.height(60.dp))
                     Text(
                         if (granted) "Microphone permission granted"
-                        else "Needed for wake word detection",
+                        else "Needed for voice and wake phrase",
                         color = OmniColors.InkMute,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Light,
@@ -258,7 +247,38 @@ private fun AccessibilityStep(
                 CapabilityPill(painterResource(R.drawable.ic_chat), "Type into input fields")
             }
         },
-        ctaLabel = "Open accessibility settings",
+        ctaLabel = if (granted) "Continue" else "Open accessibility settings",
+        onCta = if (granted) onContinue else onOpen,
+        skipLabel = if (granted) null else "Skip for now",
+        onSkip = onSkip,
+    )
+}
+
+// ─── Step 3: Always-on-top overlay ──────────────────────────────────────────
+
+@Composable
+private fun OverlayStep(
+    granted: Boolean,
+    onOpen: () -> Unit,
+    onSkip: () -> Unit,
+    onContinue: () -> Unit,
+) {
+    StepScaffold(
+        title = "Always on-top",
+        description = "Allow Omni to show its status bubble while it works over other apps.",
+        hero = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+            ) {
+                CapabilityPill(painterResource(R.drawable.ic_eye), "Show listening status")
+                CapabilityPill(painterResource(R.drawable.ic_bolt), "Keep task progress visible")
+                CapabilityPill(painterResource(R.drawable.ic_chat), "Return control anytime")
+            }
+        },
+        ctaLabel = if (granted) "Finish setup" else "Open always-on-top settings",
         onCta = if (granted) onContinue else onOpen,
         skipLabel = if (granted) null else "Skip for now",
         onSkip = onSkip,

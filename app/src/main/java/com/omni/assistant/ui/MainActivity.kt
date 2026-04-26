@@ -16,11 +16,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.omni.assistant.OmniApplication
 import com.omni.assistant.agent.AgentController
 import com.omni.assistant.service.OmniListenerService
 import com.omni.assistant.service.OmniOverlayService
 import com.omni.assistant.ui.theme.OmniTheme
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -57,31 +60,52 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Request battery exemption once, after first launch
-        val pm = getSystemService(POWER_SERVICE) as PowerManager
-        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-            val prefs = getSharedPreferences("omni_flags", MODE_PRIVATE)
-            if (!prefs.getBoolean("battery_asked", false)) {
-                prefs.edit().putBoolean("battery_asked", true).apply()
-                startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                    data = Uri.parse("package:$packageName")
-                })
+        lifecycleScope.launch {
+            val onboardingComplete = (application as OmniApplication)
+                .settingsRepository
+                .onboardingComplete
+                .first()
+            if (!onboardingComplete) return@launch
+
+            // Request battery exemption only after onboarding so system prompts
+            // follow the designed permission sequence.
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                val prefs = getSharedPreferences("omni_flags", MODE_PRIVATE)
+                if (!prefs.getBoolean("battery_asked", false)) {
+                    prefs.edit().putBoolean("battery_asked", true).apply()
+                    startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = Uri.parse("package:$packageName")
+                    })
+                }
             }
         }
     }
 
-    private fun startWakeWordIfReady() {
-        val hasPermission = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-        Log.d("OmniMain", "startWakeWordIfReady: hasPermission=$hasPermission")
-        if (hasPermission) {
-            Log.d("OmniMain", "Starting wake word service...")
-            sendServiceAction(OmniListenerService.ACTION_START_WAKE_WORD)
-        } else {
-            Log.d("OmniMain", "Requesting mic permission for wake word...")
-            pendingServiceAction = OmniListenerService.ACTION_START_WAKE_WORD
-            requestAudioPermission.launch(Manifest.permission.RECORD_AUDIO)
+    fun startWakeWordIfReady() {
+        lifecycleScope.launch {
+            val repo = (application as OmniApplication).settingsRepository
+            val authToken = repo.authToken.first()
+            val onboardingComplete = repo.onboardingComplete.first()
+            val subscriptionActive = repo.subscriptionStatus.first() == "active" &&
+                repo.subscriptionPlan.first() != "free"
+            if (authToken.isBlank() || !onboardingComplete || !subscriptionActive) {
+                Log.d("OmniMain", "Skipping wake word until sign-in, subscription, and onboarding complete")
+                return@launch
+            }
+
+            val hasPermission = ContextCompat.checkSelfPermission(
+                this@MainActivity, Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            Log.d("OmniMain", "startWakeWordIfReady: hasPermission=$hasPermission")
+            if (hasPermission) {
+                Log.d("OmniMain", "Starting wake word service...")
+                sendServiceAction(OmniListenerService.ACTION_START_WAKE_WORD)
+            } else {
+                Log.d("OmniMain", "Requesting mic permission for wake word...")
+                pendingServiceAction = OmniListenerService.ACTION_START_WAKE_WORD
+                requestAudioPermission.launch(Manifest.permission.RECORD_AUDIO)
+            }
         }
     }
 

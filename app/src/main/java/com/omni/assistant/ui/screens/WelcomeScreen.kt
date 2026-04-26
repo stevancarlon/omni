@@ -2,10 +2,12 @@ package com.omni.assistant.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -24,7 +26,9 @@ import com.omni.assistant.ui.theme.OmniButton
  */
 @Composable
 fun WelcomeScreen(
-    onGetStarted: () -> Unit,
+    onContinueWithGoogle: () -> Unit,
+    signingIn: Boolean = false,
+    errorMessage: String? = null,
 ) {
     Box(
         modifier = Modifier
@@ -61,7 +65,7 @@ fun WelcomeScreen(
             )
             Spacer(Modifier.height(16.dp))
             Text(
-                "Your voice-powered\nAndroid companion.",
+                "Sign in once.\nUse Omni everywhere.",
                 color = OmniColors.InkDim,
                 fontSize = 17.sp,
                 lineHeight = 24.sp,
@@ -69,38 +73,69 @@ fun WelcomeScreen(
             )
             Spacer(Modifier.height(20.dp))
             Text(
-                "Say \u201CHey Omni\u201D to get things\ndone \u2014 hands-free, eyes-free.",
+                "Your subscription is tied to Google.\nNo API keys, no credit packs.",
                 color = OmniColors.InkMute,
                 fontSize = 13.sp,
                 lineHeight = 18.sp,
                 fontWeight = FontWeight.Light,
             )
+            if (errorMessage != null) {
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    errorMessage,
+                    color = OmniColors.Error,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                    fontWeight = FontWeight.Light,
+                )
+            }
 
             Spacer(Modifier.weight(1f))
 
-            GetStartedButton(onClick = onGetStarted)
+            ContinueWithGoogleButton(
+                onClick = onContinueWithGoogle,
+                signingIn = signingIn,
+            )
             Spacer(Modifier.height(24.dp))
         }
     }
 }
 
 @Composable
-private fun GetStartedButton(onClick: () -> Unit) {
+private fun ContinueWithGoogleButton(onClick: () -> Unit, signingIn: Boolean) {
     OmniButton(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         fillMaxWidth = true,
         contentPadding = PaddingValues(vertical = 18.dp),
+        enabled = !signingIn,
     ) {
-        Text(
-            "Get started",
-            style = TextStyle(
-                brush = OmniGradients.SilverText,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 16.sp,
-                letterSpacing = 0.4.sp,
-            ),
-        )
+        if (signingIn) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+                color = Color.White,
+            )
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "G",
+                    color = Color(0xFF4285F4),
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    "Continue with Google",
+                    style = TextStyle(
+                        brush = OmniGradients.SilverText,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 16.sp,
+                        letterSpacing = 0.4.sp,
+                    ),
+                )
+            }
+        }
     }
 }
 

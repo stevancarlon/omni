@@ -17,6 +17,7 @@ import com.omni.assistant.OmniApplication
 import com.omni.assistant.agent.AgentController
 import com.omni.assistant.data.AgentStatus
 import com.omni.assistant.speech.DeepgramClient
+import com.omni.assistant.speech.DeepgramSessionClient
 import com.omni.assistant.speech.ListenMode
 import com.omni.assistant.ui.MainActivity
 import com.omni.assistant.util.SpeechCorrector
@@ -32,12 +33,12 @@ class OmniListenerService : Service() {
     private var isListeningForCommand = false
     private var startedFromWakeWord = false
     private var useDeepgramForAll = false
+    private var deepgramRequestId = 0
     private var wakeLock: PowerManager.WakeLock? = null
     private lateinit var agentController: AgentController
 
     // Cached settings
     private var cachedSpeechLanguage = ""
-    private var cachedDeepgramKey = ""
     private var cachedWakeWord = "hey omni"
 
     override fun onCreate() {
@@ -102,19 +103,17 @@ class OmniListenerService : Service() {
     private suspend fun reloadSettings() {
         val repo = (application as OmniApplication).settingsRepository
         cachedSpeechLanguage = repo.speechLanguage.first()
-        cachedDeepgramKey = repo.deepgramApiKey.first()
         cachedWakeWord = repo.wakeWord.first().lowercase()
-        useDeepgramForAll = cachedDeepgramKey.isNotBlank()
-        Log.d(TAG, "Settings: deepgram=${useDeepgramForAll}, lang=$cachedSpeechLanguage, wake=$cachedWakeWord")
+        useDeepgramForAll = repo.authToken.first().isNotBlank()
+        Log.d(TAG, "Settings: backendSpeech=${useDeepgramForAll}, lang=$cachedSpeechLanguage, wake=$cachedWakeWord")
     }
 
     // ─── Listening Modes ─────────────────────────────────────────────────────
 
     private fun startWakeWordListening() {
         if (!useDeepgramForAll) {
-            // No Deepgram = no silent wake word. Don't start the beepy SpeechRecognizer.
-            Log.d(TAG, "Skipping wake word — no Deepgram key. Use Start Listening button instead.")
-            updateNotification("Tap Start Listening in the app")
+            Log.d(TAG, "Skipping wake word until signed in. Use Start Listening button instead.")
+            updateNotification("Sign in to enable wake word")
             isListeningForWakeWord = false
             return
         }
@@ -161,44 +160,75 @@ class OmniListenerService : Service() {
             return
         }
 
-        Log.d(TAG, "Creating new Deepgram connection for $mode")
+        Log.d(TAG, "Creating backend-provisioned Deepgram connection for $mode")
         deepgramClient?.stop()
         deepgramClient = null
-        deepgramClient = DeepgramClient(
-            apiKey = cachedDeepgramKey,
-            language = cachedSpeechLanguage,
-            wakeWord = cachedWakeWord,
-            onWakeWordDetected = {
-                scope.launch { onWakeWordDetected() }
-            },
-            onPartialResult = { partial ->
-                scope.launch {
-                    if (isListeningForCommand) updateNotification("Hearing: \"$partial\"")
+        val requestId = ++deepgramRequestId
+
+        scope.launch {
+            val session = runCatching {
+                DeepgramSessionClient(application as OmniApplication).create(cachedSpeechLanguage)
+            }.getOrElse { error ->
+                Log.e(TAG, "Deepgram session error: ${error.message}")
+                if (mode == ListenMode.COMMAND && isListeningForCommand) {
+                    Log.d(TAG, "Falling back to built-in recognizer for command")
+                    updateNotification("Listening... speak your command")
+                    startBuiltinRecognizer(wakeWordMode = false)
+                } else {
+                    updateNotification("Speech unavailable: ${error.message}")
                 }
-            },
-            onFinalResult = { final ->
-                Log.d(TAG, "Deepgram final: $final")
-            },
-            onCommandComplete = { fullText ->
-                scope.launch {
-                    if (isListeningForCommand) {
-                        handleCommandResult(fullText.lowercase(), listOf(fullText.lowercase()))
-                    }
-                }
-            },
-            onError = { error ->
-                Log.e(TAG, "Deepgram error: $error")
-                scope.launch {
-                    deepgramClient = null
-                    delay(2000)
-                    if (isListeningForWakeWord || isListeningForCommand) {
-                        val retryMode = if (isListeningForWakeWord) ListenMode.WAKE_WORD else ListenMode.COMMAND
-                        startOrSwitchDeepgram(retryMode)
-                    }
-                }
+                return@launch
             }
-        )
-        deepgramClient?.start(this, mode)
+            if (requestId != deepgramRequestId) return@launch
+
+            deepgramClient = DeepgramClient(
+                websocketUrl = session.url,
+                accessToken = session.accessToken,
+                language = cachedSpeechLanguage,
+                wakeWord = cachedWakeWord,
+                onWakeWordDetected = {
+                    scope.launch { onWakeWordDetected() }
+                },
+                onPartialResult = { partial ->
+                    scope.launch {
+                        if (isListeningForCommand) {
+                            agentController.onTranscriptionUpdated(partial)
+                            updateNotification("Hearing: \"$partial\"")
+                        }
+                    }
+                },
+                onFinalResult = { final ->
+                    Log.d(TAG, "Deepgram final: $final")
+                    scope.launch {
+                        if (isListeningForCommand) agentController.onTranscriptionUpdated(final)
+                    }
+                },
+                onCommandComplete = { fullText ->
+                    scope.launch {
+                        if (isListeningForCommand) {
+                            handleCommandResult(fullText.lowercase(), listOf(fullText.lowercase()))
+                        }
+                    }
+                },
+                onError = { error ->
+                    Log.e(TAG, "Deepgram error: $error")
+                    scope.launch {
+                        deepgramClient = null
+                        if (isListeningForCommand) {
+                            Log.d(TAG, "Falling back to built-in recognizer after Deepgram error")
+                            startBuiltinRecognizer(wakeWordMode = false)
+                            return@launch
+                        }
+                        delay(2000)
+                        if (isListeningForWakeWord || isListeningForCommand) {
+                            val retryMode = if (isListeningForWakeWord) ListenMode.WAKE_WORD else ListenMode.COMMAND
+                            startOrSwitchDeepgram(retryMode)
+                        }
+                    }
+                }
+            )
+            deepgramClient?.start(this@OmniListenerService, mode)
+        }
     }
 
     // ─── Built-in Speech Recognition (fallback) ─────────────────────────────
@@ -280,11 +310,15 @@ class OmniListenerService : Service() {
         }
 
         override fun onPartialResults(partialResults: Bundle?) {
-            if (!wakeWordMode) return
             val partial = partialResults
                 ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 ?.firstOrNull()?.lowercase() ?: return
-            if (partial.contains(cachedWakeWord)) speechRecognizer?.stopListening()
+            if (wakeWordMode) {
+                if (partial.contains(cachedWakeWord)) speechRecognizer?.stopListening()
+            } else {
+                agentController.onTranscriptionUpdated(partial)
+                updateNotification("Hearing: \"$partial\"")
+            }
         }
     }
 

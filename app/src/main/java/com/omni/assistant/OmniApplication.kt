@@ -3,16 +3,19 @@ package com.omni.assistant
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import com.omni.assistant.auth.AuthRepository
 import com.omni.assistant.data.SettingsRepository
 
 class OmniApplication : Application() {
 
     lateinit var settingsRepository: SettingsRepository
+    lateinit var authRepository: AuthRepository
 
     override fun onCreate() {
         super.onCreate()
         instance = this
         settingsRepository = SettingsRepository(this)
+        authRepository = AuthRepository(this)
         createNotificationChannels()
     }
 

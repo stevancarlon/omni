@@ -17,7 +17,8 @@ import okio.ByteString.Companion.toByteString
 enum class ListenMode { WAKE_WORD, COMMAND }
 
 class DeepgramClient(
-    private val apiKey: String,
+    private val websocketUrl: String,
+    private val accessToken: String,
     private val language: String = "",
     private val wakeWord: String = "hey omni",
     private val onWakeWordDetected: () -> Unit = {},
@@ -58,24 +59,14 @@ class DeepgramClient(
 
         mode = initialMode
         commandTranscript.clear()
-
-        // Always use multi-language so wake word "Hey Omni" works regardless of language setting
-        val langParam = "multi"
-
-        val url = "wss://api.deepgram.com/v1/listen" +
-            "?encoding=linear16&sample_rate=$SAMPLE_RATE&channels=1" +
-            "&model=nova-3" +
-            "&language=$langParam" +
-            "&smart_format=true" +
-            "&punctuate=true" +
-            "&interim_results=true" +
-            "&endpointing=800" +
-            "&utterance_end_ms=3000" +
-            "&vad_events=true"
+        if (initialMode == ListenMode.COMMAND) {
+            commandModeStartTime = System.currentTimeMillis()
+            ignoreUntil = System.currentTimeMillis() + 150
+        }
 
         val request = Request.Builder()
-            .url(url)
-            .header("Authorization", "Token $apiKey")
+            .url(websocketUrl)
+            .header("Authorization", "Bearer $accessToken")
             .build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
@@ -223,9 +214,10 @@ class DeepgramClient(
                 "Results" -> {
                     val transcript = extractTranscript(json) ?: return
                     val isFinal = json.get("is_final")?.asBoolean ?: false
+                    val speechFinal = json.get("speech_final")?.asBoolean ?: false
                     when (mode) {
                         ListenMode.WAKE_WORD -> handleWakeWordResult(transcript)
-                        ListenMode.COMMAND -> handleCommandResult(transcript, isFinal)
+                        ListenMode.COMMAND -> handleCommandResult(transcript, isFinal, speechFinal)
                     }
                 }
                 "UtteranceEnd" -> {
@@ -254,7 +246,7 @@ class DeepgramClient(
         }
     }
 
-    private fun handleCommandResult(transcript: String, isFinal: Boolean) {
+    private fun handleCommandResult(transcript: String, isFinal: Boolean, speechFinal: Boolean) {
         if (System.currentTimeMillis() < ignoreUntil) return
 
         // Strip wake word if it leaked into the command
@@ -263,13 +255,14 @@ class DeepgramClient(
             .trim()
         if (cleaned.isBlank()) return
 
-        if (isFinal) {
+        if (isFinal || speechFinal) {
             Log.d(TAG, "Command final: $cleaned")
             commandTranscript.append(cleaned).append(" ")
             onFinalResult(cleaned)
         } else {
             onPartialResult(cleaned)
         }
+        if (speechFinal) finalizeCommand()
     }
 
     private fun finalizeCommand() {

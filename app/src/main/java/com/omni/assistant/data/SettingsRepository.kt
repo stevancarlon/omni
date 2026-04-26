@@ -3,6 +3,7 @@ package com.omni.assistant.data
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import com.omni.assistant.BuildConfig
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -24,12 +25,16 @@ class SettingsRepository(private val context: Context) {
         val KEY_MAX_STEPS = intPreferencesKey("max_steps")
         val KEY_SPEECH_LANGUAGE = stringPreferencesKey("speech_language")
         val KEY_SPEECH_PROVIDER = stringPreferencesKey("speech_provider")
-        val KEY_DEEPGRAM_API_KEY = stringPreferencesKey("deepgram_api_key")
         val KEY_SYSTEM_PROMPT = stringPreferencesKey("system_prompt")
         val KEY_WELCOME_SEEN = booleanPreferencesKey("welcome_seen")
-        val KEY_CREDITS_BALANCE = intPreferencesKey("credits_balance")
+        val KEY_ONBOARDING_COMPLETE = booleanPreferencesKey("onboarding_complete")
+        val KEY_ACCOUNT_EMAIL = stringPreferencesKey("account_email")
+        val KEY_ACCOUNT_NAME = stringPreferencesKey("account_name")
+        val KEY_SUBSCRIPTION_STATUS = stringPreferencesKey("subscription_status")
+        val KEY_SUBSCRIPTION_PLAN = stringPreferencesKey("subscription_plan")
 
-        const val DEFAULT_BACKEND_URL = "https://api.omni.app"
+        val DEFAULT_BACKEND_URL = BuildConfig.DEFAULT_BACKEND_URL
+        private const val LEGACY_DEFAULT_BACKEND_URL = "http://192.168.2.111:4000"
 
         const val DEFAULT_SYSTEM_PROMPT = """You are Omni, an AI assistant that controls an Android device on behalf of the user.
 You receive the current screen state as a list of UI elements, and you must decide what action to take to accomplish the user's goal.
@@ -64,19 +69,29 @@ Be precise, methodical, and always verify your actions match the screen state be
     }
 
     val authToken: Flow<String> = context.dataStore.data.map { it[KEY_AUTH_TOKEN] ?: "" }
-    val backendUrl: Flow<String> = context.dataStore.data.map { it[KEY_BACKEND_URL] ?: DEFAULT_BACKEND_URL }
+    val backendUrl: Flow<String> = context.dataStore.data.map {
+        val storedBackendUrl = it[KEY_BACKEND_URL]?.trim()
+        when {
+            storedBackendUrl.isNullOrBlank() -> DEFAULT_BACKEND_URL
+            storedBackendUrl == LEGACY_DEFAULT_BACKEND_URL -> DEFAULT_BACKEND_URL
+            else -> storedBackendUrl
+        }
+    }
     val wakeWordEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_WAKE_WORD_ENABLED] ?: true }
     val wakeWord: Flow<String> = context.dataStore.data.map { it[KEY_WAKE_WORD] ?: "Hey Omni" }
     val ttsEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_TTS_ENABLED] ?: true }
     val maxSteps: Flow<Int> = context.dataStore.data.map { it[KEY_MAX_STEPS] ?: 30 }
     val speechLanguage: Flow<String> = context.dataStore.data.map { it[KEY_SPEECH_LANGUAGE] ?: "" }
     val speechProvider: Flow<String> = context.dataStore.data.map { it[KEY_SPEECH_PROVIDER] ?: "deepgram" }
-    val deepgramApiKey: Flow<String> = context.dataStore.data.map { it[KEY_DEEPGRAM_API_KEY] ?: "" }
     val systemPrompt: Flow<String> = context.dataStore.data.map {
         it[KEY_SYSTEM_PROMPT] ?: DEFAULT_SYSTEM_PROMPT
     }
     val welcomeSeen: Flow<Boolean> = context.dataStore.data.map { it[KEY_WELCOME_SEEN] ?: false }
-    val creditsBalance: Flow<Int> = context.dataStore.data.map { it[KEY_CREDITS_BALANCE] ?: 0 }
+    val onboardingComplete: Flow<Boolean> = context.dataStore.data.map { it[KEY_ONBOARDING_COMPLETE] ?: false }
+    val accountEmail: Flow<String> = context.dataStore.data.map { it[KEY_ACCOUNT_EMAIL] ?: "" }
+    val accountName: Flow<String> = context.dataStore.data.map { it[KEY_ACCOUNT_NAME] ?: "" }
+    val subscriptionStatus: Flow<String> = context.dataStore.data.map { it[KEY_SUBSCRIPTION_STATUS] ?: "inactive" }
+    val subscriptionPlan: Flow<String> = context.dataStore.data.map { it[KEY_SUBSCRIPTION_PLAN] ?: "free" }
 
     suspend fun setAuthToken(value: String) = context.dataStore.edit { it[KEY_AUTH_TOKEN] = value }
     suspend fun setBackendUrl(value: String) = context.dataStore.edit { it[KEY_BACKEND_URL] = value }
@@ -86,11 +101,40 @@ Be precise, methodical, and always verify your actions match the screen state be
     suspend fun setMaxSteps(value: Int) = context.dataStore.edit { it[KEY_MAX_STEPS] = value }
     suspend fun setSpeechLanguage(value: String) = context.dataStore.edit { it[KEY_SPEECH_LANGUAGE] = value }
     suspend fun setSpeechProvider(value: String) = context.dataStore.edit { it[KEY_SPEECH_PROVIDER] = value }
-    suspend fun setDeepgramApiKey(value: String) = context.dataStore.edit { it[KEY_DEEPGRAM_API_KEY] = value }
     suspend fun setSystemPrompt(value: String) = context.dataStore.edit { it[KEY_SYSTEM_PROMPT] = value }
     suspend fun setWelcomeSeen(value: Boolean) = context.dataStore.edit { it[KEY_WELCOME_SEEN] = value }
-    suspend fun addCredits(delta: Int) = context.dataStore.edit {
-        it[KEY_CREDITS_BALANCE] = (it[KEY_CREDITS_BALANCE] ?: 0) + delta
+    suspend fun setOnboardingComplete(value: Boolean) = context.dataStore.edit {
+        it[KEY_ONBOARDING_COMPLETE] = value
+    }
+
+    suspend fun setAccountSession(
+        authToken: String,
+        email: String,
+        name: String,
+        subscriptionStatus: String,
+        subscriptionPlan: String,
+    ) = context.dataStore.edit {
+        it[KEY_AUTH_TOKEN] = authToken
+        it[KEY_ACCOUNT_EMAIL] = email
+        it[KEY_ACCOUNT_NAME] = name
+        it[KEY_SUBSCRIPTION_STATUS] = subscriptionStatus
+        it[KEY_SUBSCRIPTION_PLAN] = subscriptionPlan
+        it[KEY_WELCOME_SEEN] = true
+    }
+
+    suspend fun setSubscriptionState(status: String, plan: String) = context.dataStore.edit {
+        it[KEY_SUBSCRIPTION_STATUS] = status
+        it[KEY_SUBSCRIPTION_PLAN] = plan
+    }
+
+    suspend fun clearAccountSession() = context.dataStore.edit {
+        it[KEY_AUTH_TOKEN] = ""
+        it[KEY_ACCOUNT_EMAIL] = ""
+        it[KEY_ACCOUNT_NAME] = ""
+        it[KEY_SUBSCRIPTION_STATUS] = "inactive"
+        it[KEY_SUBSCRIPTION_PLAN] = "free"
+        it[KEY_ONBOARDING_COMPLETE] = false
+        it[KEY_WELCOME_SEEN] = false
     }
 
 }

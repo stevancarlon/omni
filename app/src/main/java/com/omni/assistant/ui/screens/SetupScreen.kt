@@ -19,7 +19,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -42,16 +41,12 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.omni.assistant.R
-import com.omni.assistant.data.SettingsRepository
 import com.omni.assistant.service.OmniAccessibilityService
 import com.omni.assistant.ui.theme.OmniColors
 import com.omni.assistant.ui.theme.OmniGradients
 import com.omni.assistant.ui.theme.OmniShapes
 import com.omni.assistant.ui.theme.OmniButton
-import com.omni.assistant.ui.theme.ctaPillStyle
 import com.omni.assistant.ui.theme.dockPillStyle
-import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.launch
 
 /**
  * SetupScreen — DS 2.0 three-step onboarding wizard. Faithful to Figma
@@ -74,8 +69,6 @@ import kotlinx.coroutines.launch
 fun SetupScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val scope = rememberCoroutineScope()
-    val repo = remember { SettingsRepository(context.applicationContext) }
 
     var tick by remember { mutableStateOf(0) }
     DisposableEffect(lifecycleOwner) {
@@ -93,14 +86,6 @@ fun SetupScreen(onBack: () -> Unit) {
     val accessibilityGranted = remember(tick) { OmniAccessibilityService.instance != null }
 
     var step by remember { mutableIntStateOf(0) }
-    var selectedProvider by remember { mutableStateOf("claude") }
-
-    LaunchedEffect(Unit) {
-        val saved = repo.llmProvider.firstOrNull()
-        if (saved != null && saved in setOf("claude", "openrouter", "groq")) {
-            selectedProvider = saved
-        }
-    }
 
     val micLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -135,7 +120,7 @@ fun SetupScreen(onBack: () -> Unit) {
                     )
                 }
                 Text(
-                    "${step + 1} of 3",
+                    "${step + 1} of 2",
                     color = OmniColors.InkMute,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Light,
@@ -166,7 +151,7 @@ fun SetupScreen(onBack: () -> Unit) {
                         },
                         onSkip = { step = 1 },
                     )
-                    1 -> AccessibilityStep(
+                    else -> AccessibilityStep(
                         granted = accessibilityGranted,
                         onOpen = {
                             context.startActivity(
@@ -174,14 +159,20 @@ fun SetupScreen(onBack: () -> Unit) {
                                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             )
                         },
-                        onSkip = { step = 2 },
-                        onContinue = { step = 2 },
-                    )
-                    else -> ProviderStep(
-                        selected = selectedProvider,
-                        onSelect = { selectedProvider = it },
-                        onFinish = {
-                            scope.launch { repo.setLlmProvider(selectedProvider) }
+                        onSkip = {
+                            if (!Settings.canDrawOverlays(context)) {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(
+                                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                            Uri.parse("package:${context.packageName}")
+                                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                }
+                            }
+                            onBack()
+                        },
+                        onContinue = {
                             if (!Settings.canDrawOverlays(context)) {
                                 runCatching {
                                     context.startActivity(
@@ -293,109 +284,6 @@ private fun CapabilityPill(icon: Painter, label: String) {
             fontWeight = FontWeight.Medium,
             letterSpacing = 0.2.sp,
         )
-    }
-}
-
-// ─── Step 3: Provider ──────────────────────────────────────────────────────
-
-private data class ProviderOption(val key: String, val initial: String, val name: String, val subtitle: String)
-
-private val providerOptions = listOf(
-    ProviderOption("claude", "C", "Claude", "Anthropic"),
-    ProviderOption("openrouter", "O", "OpenRouter", "Mix of models"),
-    ProviderOption("groq", "G", "Groq", "Fast inference"),
-)
-
-@Composable
-private fun ProviderStep(
-    selected: String,
-    onSelect: (String) -> Unit,
-    onFinish: () -> Unit,
-) {
-    StepScaffold(
-        title = "Pick a brain",
-        description = "Omni needs an LLM to think. Paste an API key or pick your provider.",
-        hero = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-            ) {
-                providerOptions.forEach { opt ->
-                    ProviderPill(
-                        option = opt,
-                        selected = opt.key == selected,
-                        onClick = { onSelect(opt.key) },
-                    )
-                }
-            }
-        },
-        ctaLabel = "Finish setup",
-        onCta = onFinish,
-        skipLabel = null,
-        onSkip = {},
-    )
-}
-
-@Composable
-private fun ProviderPill(option: ProviderOption, selected: Boolean, onClick: () -> Unit) {
-    // Same dark-metal gradient body for every row. When selected, swap the
-    // gray hairline for the blue CTA hairline (`ctaPillStyle`) — the row
-    // doesn't get the outer glow (that's reserved for the actual CTA).
-    val style: Modifier = if (selected) {
-        Modifier.ctaPillStyle(OmniShapes.Pill)
-    } else {
-        Modifier.dockPillStyle(OmniShapes.Pill)
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(style)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) { onClick() }
-            .padding(horizontal = 18.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .dockPillStyle(CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                option.initial,
-                color = OmniColors.Ink,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-        Spacer(Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                option.name,
-                color = OmniColors.Ink,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = 0.2.sp,
-            )
-            Spacer(Modifier.height(1.dp))
-            Text(
-                option.subtitle,
-                color = OmniColors.InkMute,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Light,
-            )
-        }
-        if (selected) {
-            Image(
-                painter = painterResource(R.drawable.ic_check_blue),
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-            )
-        }
     }
 }
 

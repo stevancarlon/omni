@@ -35,12 +35,11 @@ class LLMClient(private val app: OmniApplication) {
         history: List<Map<String, String>>,
         voiceCandidates: List<String> = listOf(goal)
     ): LLMResponse {
-        val provider = app.settingsRepository.llmProvider.first()
-        val model = app.settingsRepository.llmModel.first()
-        val apiKey = app.settingsRepository.apiKeyForProvider(provider).first()
+        val authToken = app.settingsRepository.authToken.first()
+        val backendUrl = app.settingsRepository.backendUrl.first()
         val systemPrompt = app.settingsRepository.systemPrompt.first()
 
-        if (apiKey.isBlank()) throw IllegalStateException("API key not configured for $provider")
+        if (authToken.isBlank()) throw IllegalStateException("Not logged in — please sign in first")
 
         val userMessage = buildString {
             appendLine("Goal: $goal")
@@ -57,154 +56,37 @@ class LLMClient(private val app: OmniApplication) {
         }
 
         val messages = mutableListOf<Map<String, String>>()
-        messages.addAll(history.takeLast(10)) // Keep last 10 turns
+        messages.addAll(history.takeLast(10))
         messages.add(mapOf("role" to "user", "content" to userMessage))
 
-        return when (provider) {
-            "claude" -> callClaudeAPI(apiKey, model, systemPrompt, messages)
-            "openai" -> callOpenAIAPI(apiKey, model, systemPrompt, messages)
-            "openrouter" -> callOpenRouterAPI(apiKey, model, systemPrompt, messages)
-            "groq" -> callGroqAPI(apiKey, model, systemPrompt, messages)
-            else -> callClaudeAPI(apiKey, model, systemPrompt, messages)
-        }
+        return callBackend(backendUrl, authToken, systemPrompt, messages)
     }
 
-    private fun callClaudeAPI(
-        apiKey: String,
-        model: String,
+    private fun callBackend(
+        backendUrl: String,
+        authToken: String,
         systemPrompt: String,
         messages: List<Map<String, String>>
     ): LLMResponse {
         val body = gson.toJson(mapOf(
-            "model" to model,
-            "max_tokens" to 1024,
             "system" to systemPrompt,
             "messages" to messages
         ))
 
         val request = Request.Builder()
-            .url("https://api.anthropic.com/v1/messages")
+            .url("$backendUrl/api/llm/completions")
             .post(body.toRequestBody("application/json".toMediaType()))
-            .header("x-api-key", apiKey)
-            .header("anthropic-version", "2023-06-01")
+            .header("Authorization", "Bearer $authToken")
             .header("Content-Type", "application/json")
             .build()
 
         val response = client.newCall(request).execute()
         val responseBody = response.body?.string() ?: throw IOException("Empty response")
-        if (!response.isSuccessful) throw IOException("API error ${response.code}: $responseBody")
+        if (!response.isSuccessful) throw IOException("Backend error ${response.code}: $responseBody")
 
         val json = gson.fromJson(responseBody, JsonObject::class.java)
-        val content = json.getAsJsonArray("content")
-            .get(0).asJsonObject
-            .get("text").asString
-
-        return parseAgentResponse(content)
-    }
-
-    private fun callOpenAIAPI(
-        apiKey: String,
-        model: String,
-        systemPrompt: String,
-        messages: List<Map<String, String>>
-    ): LLMResponse {
-        val allMessages = mutableListOf(mapOf("role" to "system", "content" to systemPrompt))
-        allMessages.addAll(messages)
-
-        val body = gson.toJson(mapOf(
-            "model" to model,
-            "max_tokens" to 1024,
-            "messages" to allMessages,
-            "response_format" to mapOf("type" to "json_object")
-        ))
-
-        val request = Request.Builder()
-            .url("https://api.openai.com/v1/chat/completions")
-            .post(body.toRequestBody("application/json".toMediaType()))
-            .header("Authorization", "Bearer $apiKey")
-            .header("Content-Type", "application/json")
-            .build()
-
-        val response = client.newCall(request).execute()
-        val responseBody = response.body?.string() ?: throw IOException("Empty response")
-        if (!response.isSuccessful) throw IOException("API error ${response.code}: $responseBody")
-
-        val json = gson.fromJson(responseBody, JsonObject::class.java)
-        val content = json.getAsJsonArray("choices")
-            .get(0).asJsonObject
-            .getAsJsonObject("message")
-            .get("content").asString
-
-        return parseAgentResponse(content)
-    }
-
-    private fun callOpenRouterAPI(
-        apiKey: String,
-        model: String,
-        systemPrompt: String,
-        messages: List<Map<String, String>>
-    ): LLMResponse {
-        val allMessages = mutableListOf(mapOf("role" to "system", "content" to systemPrompt))
-        allMessages.addAll(messages)
-
-        val body = gson.toJson(mapOf(
-            "model" to model,
-            "max_tokens" to 1024,
-            "messages" to allMessages
-        ))
-
-        val request = Request.Builder()
-            .url("https://openrouter.ai/api/v1/chat/completions")
-            .post(body.toRequestBody("application/json".toMediaType()))
-            .header("Authorization", "Bearer $apiKey")
-            .header("Content-Type", "application/json")
-            .build()
-
-        val response = client.newCall(request).execute()
-        val responseBody = response.body?.string() ?: throw IOException("Empty response")
-        if (!response.isSuccessful) throw IOException("API error ${response.code}: $responseBody")
-
-        val json = gson.fromJson(responseBody, JsonObject::class.java)
-        val content = json.getAsJsonArray("choices")
-            .get(0).asJsonObject
-            .getAsJsonObject("message")
-            .get("content").asString
-
-        return parseAgentResponse(content)
-    }
-
-    private fun callGroqAPI(
-        apiKey: String,
-        model: String,
-        systemPrompt: String,
-        messages: List<Map<String, String>>
-    ): LLMResponse {
-        val allMessages = mutableListOf(mapOf("role" to "system", "content" to systemPrompt))
-        allMessages.addAll(messages)
-
-        val body = gson.toJson(mapOf(
-            "model" to model,
-            "max_tokens" to 1024,
-            "messages" to allMessages,
-            "response_format" to mapOf("type" to "json_object")
-        ))
-
-        val request = Request.Builder()
-            .url("https://api.groq.com/openai/v1/chat/completions")
-            .post(body.toRequestBody("application/json".toMediaType()))
-            .header("Authorization", "Bearer $apiKey")
-            .header("Content-Type", "application/json")
-            .build()
-
-        val response = client.newCall(request).execute()
-        val responseBody = response.body?.string() ?: throw IOException("Empty response")
-        if (!response.isSuccessful) throw IOException("API error ${response.code}: $responseBody")
-
-        val json = gson.fromJson(responseBody, JsonObject::class.java)
-        val content = json.getAsJsonArray("choices")
-            .get(0).asJsonObject
-            .getAsJsonObject("message")
-            .get("content").asString
+        val content = json.get("content")?.asString
+            ?: throw IOException("No content in backend response")
 
         return parseAgentResponse(content)
     }
@@ -223,7 +105,6 @@ class LLMClient(private val app: OmniApplication) {
     }
 
     private fun parseAgentResponse(rawJson: String): LLMResponse {
-        // Try parsing the whole response first, then try extracting JSON
         val json = tryParseJson(rawJson)
             ?: tryParseJson(extractJsonBlock(rawJson))
             ?: throw IOException("Failed to parse LLM response as JSON: ${rawJson.take(500)}")
@@ -275,7 +156,6 @@ class LLMClient(private val app: OmniApplication) {
     }
 
     private fun extractJsonBlock(text: String): String {
-        // Find balanced JSON object containing "action"
         var depth = 0
         var start = -1
         for (i in text.indices) {
@@ -294,7 +174,6 @@ class LLMClient(private val app: OmniApplication) {
                 }
             }
         }
-        // Fallback: first { to last }
         val first = text.indexOf('{')
         val last = text.lastIndexOf('}')
         return if (first >= 0 && last > first) text.substring(first, last + 1) else text

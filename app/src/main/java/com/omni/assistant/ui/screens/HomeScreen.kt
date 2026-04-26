@@ -49,6 +49,7 @@ import com.omni.assistant.agent.AgentController
 import com.omni.assistant.data.AgentStatus
 import com.omni.assistant.ui.MainActivity
 import com.omni.assistant.ui.components.OmniOrb
+import com.omni.assistant.ui.components.OmniOrbPerformance
 import com.omni.assistant.ui.theme.OmniColors
 import com.omni.assistant.ui.theme.OmniGradients
 import com.omni.assistant.ui.theme.OmniShapes
@@ -241,7 +242,11 @@ private fun IdleLayout(status: AgentStatus) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        OmniOrb(status = status, modifier = Modifier.size(orbSize))
+        OmniOrb(
+            status = status,
+            modifier = Modifier.size(orbSize),
+            performance = if (compact) OmniOrbPerformance.Static else OmniOrbPerformance.Efficient,
+        )
         Spacer(Modifier.height(gap))
         Text(
             text = if (compact) "Ready when you are." else "Say \u201CHey Omni\u201D",
@@ -479,7 +484,11 @@ private fun CenteredCaption(status: AgentStatus, caption: String, tone: Color) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.weight(1f))
-        OmniOrb(status = status, modifier = Modifier.size(220.dp))
+        OmniOrb(
+            status = status,
+            modifier = Modifier.size(220.dp),
+            performance = OmniOrbPerformance.Static,
+        )
         Spacer(Modifier.height(32.dp))
         Text(
             caption,
@@ -652,4 +661,3 @@ private fun CancelButton(label: String, onClick: () -> Unit) {
         )
     }
 }
-

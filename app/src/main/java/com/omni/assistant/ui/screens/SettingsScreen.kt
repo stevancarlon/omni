@@ -12,14 +12,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,9 +31,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -85,32 +79,17 @@ fun SettingsScreen(onBack: () -> Unit) {
     }
     val overlayGranted = remember(permTick) { Settings.canDrawOverlays(context) }
 
-    var claudeKey by remember { mutableStateOf("") }
-    var openrouterKey by remember { mutableStateOf("") }
-    var groqKey by remember { mutableStateOf("") }
-    var deepgramKey by remember { mutableStateOf("") }
-    var provider by remember { mutableStateOf("claude") }
-    var model by remember { mutableStateOf("claude-opus-4-6") }
     var wakeWordEnabled by remember { mutableStateOf(true) }
     var wakeWord by remember { mutableStateOf("Hey Omni") }
     var ttsEnabled by remember { mutableStateOf(true) }
     var maxSteps by remember { mutableIntStateOf(30) }
-    var showKeys by remember { mutableStateOf(false) }
-    var speechProvider by remember { mutableStateOf("builtin") }
     var speechLanguage by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
-        claudeKey = repo.apiKeyClaude.first().ifBlank { repo.apiKey.first() }
-        openrouterKey = repo.apiKeyOpenrouter.first()
-        groqKey = repo.apiKeyGroq.first()
-        deepgramKey = repo.deepgramApiKey.first()
-        provider = repo.llmProvider.first().takeIf { it in setOf("claude", "openrouter", "groq") } ?: "claude"
-        model = repo.llmModel.first()
         wakeWordEnabled = repo.wakeWordEnabled.first()
         wakeWord = repo.wakeWord.first()
         ttsEnabled = repo.ttsEnabled.first()
         maxSteps = repo.maxSteps.first()
-        speechProvider = repo.speechProvider.first()
         speechLanguage = repo.speechLanguage.first()
     }
 
@@ -193,99 +172,6 @@ fun SettingsScreen(onBack: () -> Unit) {
                 )
             }
 
-            // ─── LLM Provider ────────────────────────────────────────────────
-            SectionLabel("LLM PROVIDER")
-            val providers = listOf(
-                "claude" to "Claude",
-                "openrouter" to "OpenRouter",
-                "groq" to "Groq",
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                providers.forEach { (id, label) ->
-                    ChipPill(
-                        label = label,
-                        selected = provider == id,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        provider = id
-                        scope.launch { repo.setLlmProvider(id) }
-                        model = defaultModelFor(id)
-                        scope.launch { repo.setLlmModel(model) }
-                    }
-                }
-            }
-
-            // ─── API Keys ────────────────────────────────────────────────────
-            SectionLabel("API KEYS")
-            SettingsCard {
-                ApiKeyRow(
-                    label = "Claude",
-                    placeholder = "sk-ant-\u2026",
-                    value = claudeKey,
-                    visible = showKeys,
-                    onChange = { claudeKey = it; scope.launch { repo.setApiKeyClaude(it) } },
-                )
-                Divider()
-                ApiKeyRow(
-                    label = "OpenRouter",
-                    placeholder = "sk-or-\u2026",
-                    value = openrouterKey,
-                    visible = showKeys,
-                    onChange = { openrouterKey = it; scope.launch { repo.setApiKeyOpenrouter(it) } },
-                )
-                Divider()
-                ApiKeyRow(
-                    label = "Groq",
-                    placeholder = "gsk_\u2026",
-                    value = groqKey,
-                    visible = showKeys,
-                    onChange = { groqKey = it; scope.launch { repo.setApiKeyGroq(it) } },
-                )
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                Text(
-                    if (showKeys) "Hide keys" else "Show keys",
-                    color = OmniColors.Accent,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier
-                        .clip(OmniShapes.Pill)
-                        .clickable { showKeys = !showKeys }
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                )
-            }
-
-            // ─── Model ───────────────────────────────────────────────────────
-            SectionLabel("MODEL")
-            val modelOptions = modelOptionsFor(provider)
-            var modelSheetOpen by remember { mutableStateOf(false) }
-            val currentLabel = modelOptions.firstOrNull { it.first == model }?.second ?: model
-            SelectorCard(
-                title = "Model",
-                value = currentLabel,
-                onClick = { modelSheetOpen = true },
-            )
-            if (modelSheetOpen) {
-                OptionPickerSheet(
-                    title = "Choose Model",
-                    options = modelOptions,
-                    current = model,
-                    onSelect = {
-                        model = it
-                        scope.launch { repo.setLlmModel(it) }
-                        modelSheetOpen = false
-                    },
-                    onDismiss = { modelSheetOpen = false },
-                )
-            }
-
             // ─── Wake Word ───────────────────────────────────────────────────
             SectionLabel("WAKE WORD")
             SettingsCard {
@@ -309,43 +195,8 @@ fun SettingsScreen(onBack: () -> Unit) {
                 )
             }
 
-            // ─── Speech Recognition ──────────────────────────────────────────
-            SectionLabel("SPEECH RECOGNITION")
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                ChipPill(
-                    label = "Built-in",
-                    selected = speechProvider == "builtin",
-                    modifier = Modifier.weight(1f),
-                ) {
-                    speechProvider = "builtin"
-                    scope.launch { repo.setSpeechProvider("builtin") }
-                }
-                ChipPill(
-                    label = "Deepgram",
-                    selected = speechProvider == "deepgram",
-                    modifier = Modifier.weight(1f),
-                ) {
-                    speechProvider = "deepgram"
-                    scope.launch { repo.setSpeechProvider("deepgram") }
-                }
-            }
-            if (speechProvider == "deepgram") {
-                Spacer(Modifier.height(12.dp))
-                SettingsCard {
-                    ApiKeyRow(
-                        label = "Deepgram",
-                        placeholder = "dg-\u2026",
-                        value = deepgramKey,
-                        visible = showKeys,
-                        onChange = { deepgramKey = it; scope.launch { repo.setDeepgramApiKey(it) } },
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
+            // ─── Speech ──────────────────────────────────────────────────────
+            SectionLabel("SPEECH")
             val languages = languageOptions()
             val selectedLanguageLabel = languages.firstOrNull { it.first == speechLanguage }?.second
                 ?: "System Default"
@@ -425,46 +276,6 @@ private fun SectionLabel(text: String) {
     Spacer(Modifier.height(12.dp))
 }
 
-// ─── Pill chip ──────────────────────────────────────────────────────────────
-
-@Composable
-private fun ChipPill(
-    label: String,
-    selected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier = modifier,
-        contentAlignment = Alignment.Center,
-    ) {
-        val bgModifier = if (selected) {
-            Modifier.dockPillStyle(OmniShapes.Pill)
-        } else {
-            Modifier
-                .clip(OmniShapes.Pill)
-                .background(OmniColors.Surface.copy(alpha = 0.55f))
-                .border(1.dp, OmniColors.InkGhost, OmniShapes.Pill)
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(bgModifier)
-                .clickable { onClick() }
-                .padding(vertical = 12.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                label,
-                color = OmniColors.Ink,
-                fontSize = 13.sp,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Light,
-                letterSpacing = 0.3.sp,
-            )
-        }
-    }
-}
-
 // ─── Card ───────────────────────────────────────────────────────────────────
 
 @Composable
@@ -491,44 +302,6 @@ private fun Divider() {
 }
 
 // ─── Rows ───────────────────────────────────────────────────────────────────
-
-@Composable
-private fun ApiKeyRow(
-    label: String,
-    placeholder: String,
-    value: String,
-    visible: Boolean,
-    onChange: (String) -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 14.dp),
-    ) {
-        Text(label, color = OmniColors.InkMute, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(4.dp))
-        BasicTextField(
-            value = value,
-            onValueChange = onChange,
-            textStyle = TextStyle(
-                color = OmniColors.Ink,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Light,
-            ),
-            cursorBrush = SolidColor(OmniColors.Accent),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
-            decorationBox = { inner ->
-                if (value.isEmpty()) {
-                    Text(placeholder, color = OmniColors.InkGhost, fontSize = 14.sp, fontWeight = FontWeight.Light)
-                }
-                inner()
-            },
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
-}
 
 @Composable
 private fun TextInputRow(
@@ -794,33 +567,6 @@ private fun OptionPickerSheet(
 }
 
 // ─── Data helpers ───────────────────────────────────────────────────────────
-
-private fun defaultModelFor(provider: String): String = when (provider) {
-    "claude" -> "claude-opus-4-6"
-    "groq" -> "llama-3.3-70b-versatile"
-    else -> "anthropic/claude-opus-4-6"
-}
-
-private fun modelOptionsFor(provider: String): List<Pair<String, String>> = when (provider) {
-    "claude" -> listOf(
-        "claude-sonnet-4-6" to "Claude Sonnet 4.6 (fast)",
-        "claude-opus-4-6" to "Claude Opus 4.6 (smart)",
-        "claude-haiku-4-5-20251001" to "Claude Haiku 4.5 (fastest)",
-    )
-    "groq" -> listOf(
-        "llama-3.3-70b-versatile" to "Llama 3.3 70B (best)",
-        "llama-3.1-8b-instant" to "Llama 3.1 8B (fastest)",
-        "llama-4-scout-17b-16e-instruct" to "Llama 4 Scout",
-        "mixtral-8x7b-32768" to "Mixtral 8x7B",
-    )
-    "openrouter" -> listOf(
-        "anthropic/claude-sonnet-4-6" to "Claude Sonnet 4.6",
-        "anthropic/claude-haiku-4-5-20251001" to "Claude Haiku 4.5",
-        "meta-llama/llama-3.3-70b-instruct" to "Llama 3.3 70B",
-        "google/gemini-2.5-flash" to "Gemini 2.5 Flash",
-    )
-    else -> emptyList()
-}
 
 private fun languageOptions(): List<Pair<String, String>> = listOf(
     "" to "System Default",

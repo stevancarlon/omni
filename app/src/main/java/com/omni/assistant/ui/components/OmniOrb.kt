@@ -33,12 +33,22 @@ import kotlin.math.*
  * On older devices the shader isn't available, so we fall back to a simpler
  * canvas-drawn navy orb that still reads correctly but without animation.
  */
+enum class OmniOrbPerformance {
+    Static,
+    Efficient,
+    Full,
+}
+
 @Composable
-fun OmniOrb(status: AgentStatus, modifier: Modifier = Modifier) {
+fun OmniOrb(
+    status: AgentStatus,
+    modifier: Modifier = Modifier,
+    performance: OmniOrbPerformance = OmniOrbPerformance.Efficient,
+) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        ShaderOrb(status = status, modifier = modifier)
+        ShaderOrb(status = status, modifier = modifier, performance = performance)
     } else {
-        FallbackOrb(status = status, modifier = modifier)
+        FallbackOrb(status = status, modifier = modifier, performance = performance)
     }
 }
 
@@ -54,11 +64,31 @@ private fun AgentStatus.toStateIndex(): Int = when (this) {
     is AgentStatus.Error -> 6
 }
 
+private fun targetFrameMillis(status: AgentStatus, performance: OmniOrbPerformance): Long? {
+    if (performance == OmniOrbPerformance.Static) return null
+
+    val targetFps = when (performance) {
+        OmniOrbPerformance.Static -> 0
+        OmniOrbPerformance.Efficient -> when (status) {
+            is AgentStatus.Idle -> 12
+            is AgentStatus.Done,
+            is AgentStatus.Error -> 8
+            else -> 24
+        }
+        OmniOrbPerformance.Full -> when (status) {
+            is AgentStatus.Idle -> 24
+            else -> 30
+        }
+    }
+
+    return if (targetFps <= 0) null else 1_000L / targetFps
+}
+
 // ─── Shader orb (API 33+) ───────────────────────────────────────────────────
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 @Composable
-private fun ShaderOrb(status: AgentStatus, modifier: Modifier) {
+private fun ShaderOrb(status: AgentStatus, modifier: Modifier, performance: OmniOrbPerformance) {
     val shader = remember { RuntimeShader(OMNI_SHADER_SRC) }
     val brush = remember(shader) { ShaderBrush(shader) }
 
@@ -77,14 +107,23 @@ private fun ShaderOrb(status: AgentStatus, modifier: Modifier) {
         }
     }
 
-    // Drive time from the frame clock — single-source; feeds uTime. Only run
-    // while the window has focus so we don't chew GPU during transitions.
+    val targetFrameMillis = targetFrameMillis(status, performance)
+
+    // Drive time from the frame clock, but cap redraws aggressively. The shader
+    // is fragment-heavy, and updating Compose state every vsync can contend
+    // with IME, notification shade, and overlay animations on mid-tier devices.
     var timeSec by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(hasWindowFocus) {
-        if (!hasWindowFocus) return@LaunchedEffect
+    LaunchedEffect(hasWindowFocus, targetFrameMillis) {
+        if (!hasWindowFocus || targetFrameMillis == null) return@LaunchedEffect
         val start = withFrameNanos { it } - (timeSec * 1_000_000_000f).toLong()
+        var lastFrameNanos = 0L
         while (true) {
-            withFrameNanos { now -> timeSec = (now - start) / 1_000_000_000f }
+            withFrameNanos { now ->
+                if (lastFrameNanos == 0L || now - lastFrameNanos >= targetFrameMillis * 1_000_000L) {
+                    lastFrameNanos = now
+                    timeSec = (now - start) / 1_000_000_000f
+                }
+            }
         }
     }
 
@@ -104,21 +143,31 @@ private fun ShaderOrb(status: AgentStatus, modifier: Modifier) {
 // ─── Fallback orb (API < 33) ────────────────────────────────────────────────
 
 @Composable
-private fun FallbackOrb(status: AgentStatus, modifier: Modifier) {
-    val t = rememberInfiniteTransition(label = "orb-fb")
-    val breathe by t.animateFloat(
-        0.96f, 1.04f,
-        animationSpec = infiniteRepeatable(
-            tween(2400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "breathe"
-    )
-    val rotation by t.animateFloat(
-        0f, 360f,
-        animationSpec = infiniteRepeatable(tween(8000, easing = LinearEasing)),
-        label = "rot"
-    )
+private fun FallbackOrb(status: AgentStatus, modifier: Modifier, performance: OmniOrbPerformance) {
+    val shouldAnimate = performance != OmniOrbPerformance.Static
+    val breathe: Float
+    val rotation: Float
+    if (shouldAnimate) {
+        val t = rememberInfiniteTransition(label = "orb-fb")
+        val animatedBreathe by t.animateFloat(
+            0.96f, 1.04f,
+            animationSpec = infiniteRepeatable(
+                tween(2400, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "breathe"
+        )
+        val animatedRotation by t.animateFloat(
+            0f, 360f,
+            animationSpec = infiniteRepeatable(tween(8000, easing = LinearEasing)),
+            label = "rot"
+        )
+        breathe = animatedBreathe
+        rotation = animatedRotation
+    } else {
+        breathe = 1f
+        rotation = 0f
+    }
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.matchParentSize()) {
@@ -249,9 +298,9 @@ private fun Size.dbg(): String = "${width}x${height}"
 
 // ─── AGSL shader — port of figma-plugin/ui.html FS, reduced star count ──────
 //
-// Keep names short in the shader to minimise compile cost. 128 stars instead
-// of 320 from the bake-tool — mobile GPUs can chew through 128 comfortably
-// per frame at 260dp @3x density, while 320 drops to ~40fps on mid-tier.
+// Keep names short in the shader to minimise compile cost. 72 stars instead
+// of 320 from the bake-tool keeps the live orb responsive beside IME and
+// notification-shade animations on mid-tier mobile GPUs.
 //
 // State uniform (int):  0=Idle 1=Listening 2=Thinking 3=Speaking 4=Executing
 //                       5=Success 6=Error 7=Muted
@@ -305,7 +354,7 @@ float3 hueRot(float3 c, float h){
 float3 stars(float2 p, float t, float ampI){
   float3 acc = float3(0.0);
   float gSpeed = 0.085;
-  for (int i = 0; i < 128; i++){
+  for (int i = 0; i < 72; i++){
     float fi = float(i);
     float s1 = hashP(float2(fi,  1.73));
     float s2 = hashP(float2(fi,  4.21));

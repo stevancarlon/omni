@@ -59,6 +59,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.omni.assistant.ui.components.OmniOrbPerformance
 
 class OmniOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
 
@@ -354,7 +355,8 @@ private fun OverlayPill(
             // Mini orb — renders the live shader-style orb
             OmniOrb(
                 status = status,
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.size(40.dp),
+                performance = OmniOrbPerformance.Static,
             )
 
             // Status pill

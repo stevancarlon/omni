@@ -13,7 +13,7 @@ defmodule OmniBackendWeb.DeepgramController do
   """
   def create_token(conn, params) do
     api_key = Application.get_env(:omni_backend, :deepgram_api_key)
-    language = non_blank(params["language"], "multi")
+    language = non_blank(params["language"], "en-US")
     model = non_blank(params["model"], "nova-3")
 
     # Request a short-lived JWT from Deepgram. The token only needs to be valid
@@ -59,7 +59,10 @@ defmodule OmniBackendWeb.DeepgramController do
         "interim_results" => "true",
         "vad_events" => "true",
         "encoding" => "linear16",
-        "sample_rate" => "16000"
+        "sample_rate" => "16000",
+        "channels" => "1",
+        "endpointing" => "300",
+        "utterance_end_ms" => "1000"
       })
 
     "wss://api.deepgram.com/v1/listen?#{params}"

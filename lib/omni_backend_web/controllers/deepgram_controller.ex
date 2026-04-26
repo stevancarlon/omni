@@ -5,29 +5,38 @@ defmodule OmniBackendWeb.DeepgramController do
   Provisions a short-lived Deepgram session token for the Android client.
 
   Instead of embedding the Deepgram API key in the app, the client
-  requests a temporary key from our backend, then connects directly
+  requests a temporary token from our backend, then connects directly
   to Deepgram's WebSocket.
 
   POST /api/deepgram/token
-  → { "token": "...", "url": "wss://api.deepgram.com/v1/listen?..." }
+  → { "access_token": "...", "expires_in": 30, "url": "wss://api.deepgram.com/v1/listen?..." }
   """
   def create_token(conn, params) do
     api_key = Application.get_env(:omni_backend, :deepgram_api_key)
-    language = params["language"] || "multi"
-    model = params["model"] || "nova-3"
+    language = non_blank(params["language"], "multi")
+    model = non_blank(params["model"], "nova-3")
 
-    # Request a temporary key from Deepgram (valid 10 seconds — enough to open the socket)
-    case Req.post("https://api.deepgram.com/v1/manage/keys",
+    # Request a short-lived JWT from Deepgram. The token only needs to be valid
+    # while the client opens the websocket; the connection can outlive the TTL.
+    case Req.post("https://api.deepgram.com/v1/auth/grant",
            headers: [{"authorization", "Token #{api_key}"}],
-           json: %{
-             comment: "omni-session",
-             scopes: ["usage:write"],
-             time_to_live_in_seconds: 10
-           }
+           json: %{ttl_seconds: 60}
          ) do
-      {:ok, %Req.Response{status: 200, body: %{"key" => temp_key}}} ->
-        ws_url = build_ws_url(temp_key, model, language)
-        json(conn, %{token: temp_key, url: ws_url})
+      {:ok, %Req.Response{status: 200, body: %{"access_token" => access_token} = body}} ->
+        json(conn, %{
+          access_token: access_token,
+          expires_in: body["expires_in"],
+          url: build_ws_url(model, language)
+        })
+
+      {:ok, %Req.Response{status: 403, body: body}} ->
+        conn
+        |> put_status(:bad_gateway)
+        |> json(%{
+          error: "deepgram_key_forbidden",
+          detail: body,
+          message: "DEEPGRAM_API_KEY must have Member permissions to create auth grants"
+        })
 
       {:ok, %Req.Response{status: status, body: body}} ->
         conn
@@ -41,7 +50,7 @@ defmodule OmniBackendWeb.DeepgramController do
     end
   end
 
-  defp build_ws_url(key, model, language) do
+  defp build_ws_url(model, language) do
     params =
       URI.encode_query(%{
         "model" => model,
@@ -50,10 +59,18 @@ defmodule OmniBackendWeb.DeepgramController do
         "interim_results" => "true",
         "vad_events" => "true",
         "encoding" => "linear16",
-        "sample_rate" => "16000",
-        "token" => key
+        "sample_rate" => "16000"
       })
 
     "wss://api.deepgram.com/v1/listen?#{params}"
   end
+
+  defp non_blank(value, default) when is_binary(value) do
+    case String.trim(value) do
+      "" -> default
+      trimmed -> trimmed
+    end
+  end
+
+  defp non_blank(_, default), do: default
 end

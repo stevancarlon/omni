@@ -28,7 +28,16 @@ config :omni_backend,
   anthropic_api_key: System.get_env("ANTHROPIC_API_KEY"),
   openai_api_key: System.get_env("OPENAI_API_KEY"),
   openrouter_api_key: System.get_env("OPENROUTER_API_KEY"),
+  groq_api_key: System.get_env("GROQ_API_KEY"),
+  default_llm_provider: System.get_env("DEFAULT_LLM_PROVIDER", "groq"),
+  default_llm_model: System.get_env("DEFAULT_LLM_MODEL", "llama-3.3-70b-versatile"),
   deepgram_api_key: System.get_env("DEEPGRAM_API_KEY"),
+  google_web_client_id: System.get_env("GOOGLE_WEB_CLIENT_ID"),
+  google_play_package_name: System.get_env("GOOGLE_PLAY_PACKAGE_NAME"),
+  google_play_pro_product_id: System.get_env("GOOGLE_PLAY_PRO_PRODUCT_ID", "omni_pro_monthly"),
+  google_play_unlimited_product_id:
+    System.get_env("GOOGLE_PLAY_UNLIMITED_PRODUCT_ID", "omni_unlimited_monthly"),
+  google_play_service_account_json: System.get_env("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"),
   stripe_webhook_secret: System.get_env("STRIPE_WEBHOOK_SECRET")
 
 config :stripity_stripe,

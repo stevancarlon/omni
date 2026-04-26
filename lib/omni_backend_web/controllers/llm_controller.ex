@@ -1,26 +1,7 @@
 defmodule OmniBackendWeb.LLMController do
   use OmniBackendWeb, :controller
 
-  @doc """
-  Proxies LLM requests and streams responses back via SSE.
-
-  The Android app sends:
-    POST /api/llm/stream
-    { "provider": "claude"|"openai"|"openrouter",
-      "model": "...",
-      "messages": [...],
-      "system": "..." }
-
-  The server holds the connection open and streams SSE events:
-    event: token
-    data: {"text": "..."}
-
-    event: done
-    data: {"usage": {...}}
-
-    event: error
-    data: {"message": "..."}
-  """
+  @moduledoc "Proxies LLM requests through backend-held provider keys."
   @doc """
   Non-streaming completion — returns the full LLM response in one JSON body.
 
@@ -32,30 +13,29 @@ defmodule OmniBackendWeb.LLMController do
     _user = conn.assigns.current_user
     messages = params["messages"] || []
     system = params["system"]
+    model = params["model"] || Application.get_env(:omni_backend, :default_llm_model)
 
-    api_key = Application.get_env(:omni_backend, :anthropic_api_key)
+    api_key = Application.get_env(:omni_backend, :groq_api_key)
 
-    body = %{
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 4096,
-      system: system || "You are Omni, an AI assistant that controls Android devices.",
-      messages: messages
-    }
-
-    case Req.post("https://api.anthropic.com/v1/messages",
+    case Req.post("https://api.groq.com/openai/v1/chat/completions",
            headers: [
-             {"x-api-key", api_key},
-             {"anthropic-version", "2023-06-01"},
+             {"authorization", "Bearer #{api_key}"},
              {"content-type", "application/json"}
            ],
-           json: body
+           json: %{
+             model: model,
+             temperature: 0.2,
+             max_completion_tokens: 4096,
+             messages: chat_messages(messages, system),
+             response_format: %{type: "json_object"}
+           }
          ) do
       {:ok, %Req.Response{status: 200, body: resp_body}} ->
         content =
           resp_body
-          |> Map.get("content", [])
+          |> Map.get("choices", [])
           |> Enum.find_value(fn
-            %{"type" => "text", "text" => text} -> text
+            %{"message" => %{"content" => text}} -> text
             _ -> nil
           end)
 
@@ -75,8 +55,8 @@ defmodule OmniBackendWeb.LLMController do
 
   def stream(conn, params) do
     user = conn.assigns.current_user
-    provider = params["provider"] || "claude"
-    model = params["model"]
+    provider = params["provider"] || Application.get_env(:omni_backend, :default_llm_provider)
+    model = params["model"] || Application.get_env(:omni_backend, :default_llm_model)
     messages = params["messages"] || []
     system = params["system"]
 
@@ -172,7 +152,27 @@ defmodule OmniBackendWeb.LLMController do
     {
       "https://openrouter.ai/api/v1/chat/completions",
       [{"authorization", "Bearer #{api_key}"}, {"content-type", "application/json"}],
-      %{model: model || "anthropic/claude-sonnet-4-20250514", stream: true, messages: sys_msg ++ messages}
+      %{
+        model: model || "anthropic/claude-sonnet-4-20250514",
+        stream: true,
+        messages: sys_msg ++ messages
+      }
+    }
+  end
+
+  defp build_request("groq", model, messages, system) do
+    api_key = Application.get_env(:omni_backend, :groq_api_key)
+
+    {
+      "https://api.groq.com/openai/v1/chat/completions",
+      [{"authorization", "Bearer #{api_key}"}, {"content-type", "application/json"}],
+      %{
+        model: model || "llama-3.3-70b-versatile",
+        temperature: 0.2,
+        max_completion_tokens: 4096,
+        stream: true,
+        messages: chat_messages(messages, system)
+      }
     }
   end
 
@@ -183,10 +183,17 @@ defmodule OmniBackendWeb.LLMController do
       case line do
         "data: " <> json_str ->
           case Jason.decode(json_str) do
-            {:ok, %{"type" => "content_block_delta", "delta" => %{"text" => text}}} -> {:token, text}
-            {:ok, %{"type" => "message_stop"}} -> :done
-            {:ok, %{"type" => "error", "error" => %{"message" => msg}}} -> {:error, msg}
-            _ -> acc
+            {:ok, %{"type" => "content_block_delta", "delta" => %{"text" => text}}} ->
+              {:token, text}
+
+            {:ok, %{"type" => "message_stop"}} ->
+              :done
+
+            {:ok, %{"type" => "error", "error" => %{"message" => msg}}} ->
+              {:error, msg}
+
+            _ ->
+              acc
           end
 
         _ ->
@@ -205,7 +212,8 @@ defmodule OmniBackendWeb.LLMController do
 
         "data: " <> json_str ->
           case Jason.decode(json_str) do
-            {:ok, %{"choices" => [%{"delta" => %{"content" => text}} | _]}} when is_binary(text) ->
+            {:ok, %{"choices" => [%{"delta" => %{"content" => text}} | _]}}
+            when is_binary(text) ->
               {:token, text}
 
             _ ->
@@ -216,6 +224,14 @@ defmodule OmniBackendWeb.LLMController do
           acc
       end
     end)
+  end
+
+  defp chat_messages(messages, system) do
+    sys_msg =
+      system ||
+        "You are Omni, an AI assistant that controls Android devices. Respond only with valid JSON."
+
+    [%{role: "system", content: sys_msg} | messages]
   end
 
   defp send_sse(conn, event, data) do

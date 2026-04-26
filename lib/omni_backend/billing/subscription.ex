@@ -8,6 +8,10 @@ defmodule OmniBackend.Billing.Subscription do
   schema "subscriptions" do
     field :stripe_customer_id, :string
     field :stripe_subscription_id, :string
+    field :google_package_name, :string
+    field :google_product_id, :string
+    field :google_purchase_token, :string
+    field :google_order_id, :string
     field :plan, :string, default: "free"
     field :status, :string, default: "active"
     field :current_period_end, :utc_datetime
@@ -19,7 +23,18 @@ defmodule OmniBackend.Billing.Subscription do
 
   def changeset(subscription, attrs) do
     subscription
-    |> cast(attrs, [:stripe_customer_id, :stripe_subscription_id, :plan, :status, :current_period_end, :user_id])
+    |> cast(attrs, [
+      :stripe_customer_id,
+      :stripe_subscription_id,
+      :google_package_name,
+      :google_product_id,
+      :google_purchase_token,
+      :google_order_id,
+      :plan,
+      :status,
+      :current_period_end,
+      :user_id
+    ])
     |> validate_required([:user_id, :plan, :status])
     |> validate_inclusion(:plan, ~w(free pro unlimited))
     |> validate_inclusion(:status, ~w(active past_due canceled))

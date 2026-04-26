@@ -26,10 +26,18 @@ defmodule OmniBackend.Accounts.ApiToken do
   end
 
   defp put_token(changeset) do
-    put_change(changeset, :token, :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false))
+    put_change(
+      changeset,
+      :token,
+      :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+    )
   end
 
   defp put_expiry(changeset) do
-    put_change(changeset, :expires_at, DateTime.add(DateTime.utc_now(), 90, :day) |> DateTime.truncate(:second))
+    put_change(
+      changeset,
+      :expires_at,
+      DateTime.add(DateTime.utc_now(), 90, :day) |> DateTime.truncate(:second)
+    )
   end
 end

@@ -7,11 +7,27 @@ defmodule OmniBackendWeb.BillingController do
     user = conn.assigns.current_user
     sub = Billing.get_subscription(user)
 
-    json(conn, %{
-      plan: (sub && sub.plan) || "free",
-      status: (sub && sub.status) || "active",
-      current_period_end: sub && sub.current_period_end
-    })
+    json(conn, %{subscription: Billing.subscription_payload(sub)})
+  end
+
+  def verify_google(conn, params) do
+    user = conn.assigns.current_user
+
+    case Billing.verify_google_purchase(user, params) do
+      {:ok, sub} ->
+        json(conn, %{subscription: Billing.subscription_payload(sub)})
+
+      {:error, reason} ->
+        conn
+        |> put_status(:bad_request)
+        |> json(%{error: "purchase_verification_failed", detail: inspect(reason)})
+    end
+  end
+
+  def restore_google(conn, _params) do
+    user = conn.assigns.current_user
+    sub = Billing.get_subscription(user)
+    json(conn, %{subscription: Billing.subscription_payload(sub)})
   end
 
   @doc "Stripe webhook handler — receives events and updates local subscription state."

@@ -9,12 +9,17 @@ defmodule OmniBackendWeb.Router do
     plug OmniBackendWeb.Plugs.Auth
   end
 
+  pipeline :entitled do
+    plug OmniBackendWeb.Plugs.Entitlement
+  end
+
   # Public routes
   scope "/api", OmniBackendWeb do
     pipe_through :api
 
     post "/auth/register", AuthController, :register
     post "/auth/login", AuthController, :login
+    post "/auth/google", AuthController, :google
 
     # Stripe webhook (no auth — verified via signature)
     post "/billing/webhook", BillingController, :webhook
@@ -27,15 +32,22 @@ defmodule OmniBackendWeb.Router do
     get "/auth/me", AuthController, :me
     delete "/auth/logout", AuthController, :logout
 
+    # Billing
+    get "/billing/status", BillingController, :status
+    post "/billing/google/verify", BillingController, :verify_google
+    post "/billing/google/restore", BillingController, :restore_google
+  end
+
+  # Paid entitlement routes
+  scope "/api", OmniBackendWeb do
+    pipe_through [:api, :authenticated, :entitled]
+
     # LLM
     post "/llm/stream", LLMController, :stream
     post "/llm/completions", LLMController, :completions
 
     # Deepgram session token
     post "/deepgram/token", DeepgramController, :create_token
-
-    # Billing
-    get "/billing/status", BillingController, :status
   end
 
   # Enable LiveDashboard in development

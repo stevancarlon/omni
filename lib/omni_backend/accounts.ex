@@ -13,10 +13,50 @@ defmodule OmniBackend.Accounts do
     user = Repo.get_by(User, email: String.downcase(email))
 
     cond do
-      user && Bcrypt.verify_pass(password, user.password_hash) -> {:ok, user}
-      user -> {:error, :invalid_password}
-      true -> Bcrypt.no_user_verify(); {:error, :not_found}
+      user && Bcrypt.verify_pass(password, user.password_hash) ->
+        {:ok, user}
+
+      user ->
+        {:error, :invalid_password}
+
+      true ->
+        Bcrypt.no_user_verify()
+        {:error, :not_found}
     end
+  end
+
+  def get_or_create_google_user(attrs) do
+    google_sub = attrs.google_sub || attrs[:google_sub]
+    email = attrs.email || attrs[:email]
+
+    case find_google_user(google_sub, email) do
+      nil ->
+        %User{}
+        |> User.google_changeset(Map.new(attrs))
+        |> Repo.insert()
+
+      user ->
+        update_google_user(user, attrs)
+    end
+  end
+
+  defp find_google_user(google_sub, email) do
+    cond do
+      is_binary(google_sub) && Repo.get_by(User, google_sub: google_sub) ->
+        Repo.get_by(User, google_sub: google_sub)
+
+      is_binary(email) ->
+        Repo.get_by(User, email: String.downcase(email))
+
+      true ->
+        nil
+    end
+  end
+
+  defp update_google_user(user, attrs) do
+    user
+    |> User.google_changeset(Map.new(attrs))
+    |> Repo.update()
   end
 
   def create_api_token(user, device_name \\ nil) do
@@ -56,7 +96,9 @@ defmodule OmniBackend.Accounts do
         where: is_nil(t.revoked_at)
 
     case Repo.one(query) do
-      nil -> {:error, :not_found}
+      nil ->
+        {:error, :not_found}
+
       token ->
         token
         |> Ecto.Changeset.change(revoked_at: DateTime.truncate(DateTime.utc_now(), :second))
@@ -65,4 +107,13 @@ defmodule OmniBackend.Accounts do
   end
 
   def get_user!(id), do: Repo.get!(User, id)
+
+  def user_payload(user) do
+    %{
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      avatar_url: Map.get(user, :avatar_url)
+    }
+  end
 end

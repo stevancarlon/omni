@@ -2,6 +2,7 @@ defmodule OmniBackendWeb.AuthController do
   use OmniBackendWeb, :controller
 
   alias OmniBackend.Accounts
+  alias OmniBackend.Accounts.GoogleAuth
   alias OmniBackend.Billing
 
   def register(conn, %{"email" => _, "password" => _} = params) do
@@ -39,13 +40,33 @@ defmodule OmniBackendWeb.AuthController do
     end
   end
 
+  def google(conn, %{"idToken" => id_token} = params) do
+    with {:ok, attrs} <- GoogleAuth.verify_id_token(id_token),
+         {:ok, user} <- Accounts.get_or_create_google_user(attrs),
+         {:ok, token} <-
+           Accounts.create_api_token(user, params["device_name"] || params["platform"]),
+         {:ok, sub} <- Billing.get_or_create_subscription(user) do
+      json(conn, session_payload(user, token, sub))
+    else
+      {:error, :google_client_id_not_configured} ->
+        conn
+        |> put_status(:service_unavailable)
+        |> json(%{error: "google_auth_not_configured"})
+
+      {:error, reason} ->
+        conn
+        |> put_status(:unauthorized)
+        |> json(%{error: "invalid_google_token", detail: inspect(reason)})
+    end
+  end
+
   def me(conn, _params) do
     user = conn.assigns.current_user
     sub = Billing.get_subscription(user)
 
     json(conn, %{
-      user: %{id: user.id, email: user.email, name: user.name},
-      plan: (sub && sub.plan) || "free"
+      user: Accounts.user_payload(user),
+      subscription: Billing.subscription_payload(sub)
     })
   end
 
@@ -61,5 +82,19 @@ defmodule OmniBackendWeb.AuthController do
         opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
       end)
     end)
+  end
+
+  defp session_payload(user, token, sub) do
+    subscription = Billing.subscription_payload(sub)
+
+    %{
+      authToken: token.token,
+      token: token.token,
+      user: Accounts.user_payload(user),
+      email: user.email,
+      name: user.name,
+      subscription: subscription,
+      subscriptionStatus: if(subscription.active, do: "active", else: "inactive")
+    }
   end
 end

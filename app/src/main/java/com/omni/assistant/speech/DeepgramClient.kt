@@ -34,6 +34,7 @@ class DeepgramClient(
     private var audioRecord: AudioRecord? = null
     @Volatile private var isRecording = false
     @Volatile private var wsOpen = false
+    @Volatile private var intentionallyStopping = false
     private var recordingJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val gson = Gson()
@@ -44,6 +45,10 @@ class DeepgramClient(
         normalizePhrase(wakeWord),
         normalizePhrase("hey omni"),
         normalizePhrase("hey homie"),
+        normalizePhrase("hey umini"),
+        normalizePhrase("hey umni"),
+        normalizePhrase("hey mini"),
+        normalizePhrase("hey omie"),
     ).filter { it.isNotBlank() }.distinct()
     private var commandModeStartTime = 0L
     private var ignoreUntil = 0L
@@ -69,6 +74,7 @@ class DeepgramClient(
         }
 
         mode = initialMode
+        intentionallyStopping = false
         commandTranscript.clear()
         noCommandReported = false
         wakeDetected = initialMode != ListenMode.WAKE_WORD
@@ -107,6 +113,9 @@ class DeepgramClient(
                 Log.d(TAG, "WebSocket closed: $reason")
                 wsOpen = false
                 isRecording = false
+                if (!intentionallyStopping) {
+                    onError("Connection closed: $code $reason")
+                }
             }
         })
     }
@@ -128,6 +137,7 @@ class DeepgramClient(
     }
 
     fun stop() {
+        intentionallyStopping = true
         wsOpen = false
         isRecording = false
         commandFinalizeJob?.cancel()
@@ -192,9 +202,10 @@ class DeepgramClient(
                     var i = 0
                     var peak = 0
                     var clippedSamples = 0
+                    val gain = if (mode == ListenMode.WAKE_WORD) WAKE_GAIN else COMMAND_GAIN
                     while (i < read - 1) {
                         val sample = ((buffer[i + 1].toInt() shl 8) or (buffer[i].toInt() and 0xFF)).toShort().toInt()
-                        val boosted = sample * GAIN
+                        val boosted = sample * gain
                         // Soft-clip above SOFT_KNEE using tanh-like curve — preserves
                         // waveform shape under overload so consonants stay intelligible.
                         val limited = when {
@@ -225,7 +236,7 @@ class DeepgramClient(
                     }
                     if (now - lastLogMs > 3000) {
                         lastLogMs = now
-                        Log.d(TAG, "Audio: ${bytesSent / 1024}KB sent, ws=${wsOpen}, peak=$peak/32767 (x${GAIN}, clipped=${clippedSamples})")
+                        Log.d(TAG, "Audio: ${bytesSent / 1024}KB sent, ws=${wsOpen}, peak=$peak/32767 (x${gain}, clipped=${clippedSamples})")
                     }
                 }
             }
@@ -239,6 +250,18 @@ class DeepgramClient(
         try {
             val json = gson.fromJson(text, JsonObject::class.java)
             when (json.get("type")?.asString) {
+                "Error" -> {
+                    val message = json.get("message")?.asString
+                        ?: json.get("description")?.asString
+                        ?: text.take(200)
+                    onError("Deepgram error event: $message")
+                }
+                "TurnInfo" -> {
+                    val transcript = json.get("transcript")?.asString?.trim()
+                    if (!transcript.isNullOrBlank() && mode == ListenMode.WAKE_WORD) {
+                        handleWakeWordResult(transcript)
+                    }
+                }
                 "Results" -> {
                     val isFinal = json.get("is_final")?.asBoolean ?: false
                     val speechFinal = json.get("speech_final")?.asBoolean ?: false
@@ -303,7 +326,14 @@ class DeepgramClient(
 
     private fun isWakeWordMatch(text: String): Boolean {
         val normalized = normalizePhrase(text)
-        return normalizedWakeWords.any { normalized.contains(it) }
+        if (normalizedWakeWords.any { normalized.contains(it) }) return true
+
+        val words = normalized.split(" ").filter { it.isNotBlank() }
+        val heyIndex = words.indexOf("hey")
+        if (heyIndex == -1 || heyIndex == words.lastIndex) return false
+
+        val candidate = words[heyIndex + 1]
+        return candidate in WAKE_WORD_ALIASES || editDistance(candidate, "omni") <= 2
     }
 
     private fun normalizePhrase(text: String): String {
@@ -312,6 +342,30 @@ class DeepgramClient(
             .replace(Regex("[^a-z ]"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
+    }
+
+    private fun editDistance(a: String, b: String): Int {
+        if (a == b) return 0
+        if (a.isEmpty()) return b.length
+        if (b.isEmpty()) return a.length
+
+        var previous = IntArray(b.length + 1) { it }
+        var current = IntArray(b.length + 1)
+        for (i in a.indices) {
+            current[0] = i + 1
+            for (j in b.indices) {
+                val substitutionCost = if (a[i] == b[j]) 0 else 1
+                current[j + 1] = minOf(
+                    current[j] + 1,
+                    previous[j + 1] + 1,
+                    previous[j] + substitutionCost,
+                )
+            }
+            val tmp = previous
+            previous = current
+            current = tmp
+        }
+        return previous[b.length]
     }
 
     private fun handleCommandResult(transcript: String, isFinal: Boolean, speechFinal: Boolean) {
@@ -396,8 +450,10 @@ class DeepgramClient(
         private const val COMMAND_FINALIZE_DEBOUNCE_MS = 900L
         private const val AUDIO_LEVEL_INTERVAL_MS = 50L
         private const val MAX_EMPTY_COMMAND_FINALS = 2
-        private const val MAX_EMPTY_WAKE_FINALS = 3
-        private const val GAIN = 2
+        private const val MAX_EMPTY_WAKE_FINALS = 6
+        private const val COMMAND_GAIN = 2
+        private const val WAKE_GAIN = 3
         private const val SOFT_KNEE = 24000  // start soft-clipping at ~73% of full scale
+        private val WAKE_WORD_ALIASES = setOf("omni", "umini", "umni", "mini", "omie", "homie")
     }
 }

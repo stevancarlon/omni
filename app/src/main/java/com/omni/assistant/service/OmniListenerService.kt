@@ -23,6 +23,7 @@ import com.omni.assistant.ui.MainActivity
 import com.omni.assistant.util.SpeechCorrector
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
+import java.net.URLEncoder
 
 class OmniListenerService : Service() {
 
@@ -36,6 +37,7 @@ class OmniListenerService : Service() {
     private var wakeWordEnabled = true
     private var speechProvider = "deepgram"
     private var deepgramRequestId = 0
+    private var activeDeepgramMode: ListenMode? = null
     private var activeCommandId = 0
     private var returnToWakeJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
@@ -170,6 +172,7 @@ class OmniListenerService : Service() {
         speechRecognizer = null
         deepgramClient?.stop()
         deepgramClient = null
+        activeDeepgramMode = null
         hideOverlay()
         stopSelf()
     }
@@ -178,8 +181,8 @@ class OmniListenerService : Service() {
 
     private fun startOrSwitchDeepgram(mode: ListenMode) {
         val existing = deepgramClient
-        if (mode == ListenMode.WAKE_WORD && existing != null && existing.isConnected) {
-            Log.d(TAG, "Reusing Deepgram connection, switching to $mode")
+        if (mode == activeDeepgramMode && existing != null && existing.isConnected) {
+            Log.d(TAG, "Keeping active Deepgram connection for $mode")
             existing.switchMode(mode)
             return
         }
@@ -187,11 +190,13 @@ class OmniListenerService : Service() {
         Log.d(TAG, "Creating fresh backend-provisioned Deepgram connection for $mode")
         deepgramClient?.stop()
         deepgramClient = null
+        activeDeepgramMode = null
         val requestId = ++deepgramRequestId
 
         scope.launch {
             val session = runCatching {
-                DeepgramSessionClient(application as OmniApplication).create(cachedSpeechLanguage)
+                val model = if (mode == ListenMode.WAKE_WORD) DEEPGRAM_WAKE_MODEL else DEEPGRAM_COMMAND_MODEL
+                DeepgramSessionClient(application as OmniApplication).create(cachedSpeechLanguage, model)
             }.getOrElse { error ->
                 Log.e(TAG, "Deepgram session error: ${error.message}")
                 if (mode == ListenMode.COMMAND && isListeningForCommand) {
@@ -204,14 +209,19 @@ class OmniListenerService : Service() {
                 return@launch
             }
             if (requestId != deepgramRequestId) return@launch
+            activeDeepgramMode = mode
 
             deepgramClient = DeepgramClient(
-                websocketUrl = session.url,
+                websocketUrl = prepareDeepgramUrl(session.url, mode),
                 accessToken = session.accessToken,
                 language = cachedSpeechLanguage,
                 wakeWord = cachedWakeWord,
                 onWakeWordDetected = {
-                    scope.launch { onWakeWordDetected() }
+                    scope.launch {
+                        if (mode == ListenMode.WAKE_WORD && isListeningForWakeWord) {
+                            onWakeWordDetected()
+                        }
+                    }
                 },
                 onPartialResult = { partial ->
                     scope.launch {
@@ -249,6 +259,7 @@ class OmniListenerService : Service() {
                     scope.launch {
                         deepgramClient?.stop()
                         deepgramClient = null
+                        activeDeepgramMode = null
                         if (isListeningForCommand) {
                             Log.d(TAG, "Falling back to built-in recognizer after Deepgram error")
                             startBuiltinRecognizer(wakeWordMode = false)
@@ -426,6 +437,9 @@ class OmniListenerService : Service() {
     // ─── Callbacks ───────────────────────────────────────────────────────────
 
     private fun onWakeWordDetected() {
+        if (!isListeningForWakeWord) return
+        isListeningForWakeWord = false
+        isListeningForCommand = true
         startedFromWakeWord = true
         updateNotification("Wake word detected!")
         agentController.onWakeWordDetected()
@@ -437,10 +451,7 @@ class OmniListenerService : Service() {
             startForegroundService(overlayIntent)
         }
 
-        scope.launch {
-            delay(300)
-            startCommandListening()
-        }
+        startCommandListening()
     }
 
     private fun isAppInForeground(): Boolean {
@@ -466,6 +477,11 @@ class OmniListenerService : Service() {
                 }
             }
             if (commandId == activeCommandId && !isListeningForCommand) {
+                // Wait for TTS to finish so the mic doesn't pick up spoken output
+                withTimeoutOrNull(TTS_FINISH_TIMEOUT_MS) {
+                    agentController.ttsActive.first { !it }
+                }
+                delay(RETURN_TO_WAKE_COOLDOWN_MS)
                 startWakeWordListening()
             }
         }
@@ -508,9 +524,33 @@ class OmniListenerService : Service() {
         returnToWakeJob = null
     }
 
+    private fun prepareDeepgramUrl(url: String, mode: ListenMode): String {
+        if (mode != ListenMode.WAKE_WORD) return url
+        val base = if (url.contains("/v1/listen")) {
+            "${url.substringBefore("/v1/listen")}/v2/listen"
+        } else {
+            url.substringBefore("?")
+        }
+        val params = listOf(
+            "model" to DEEPGRAM_WAKE_MODEL,
+            "encoding" to "linear16",
+            "sample_rate" to "16000",
+            "eot_timeout_ms" to "1000",
+            "keyterm" to "Omni",
+            "keyterm" to "Hey Omni",
+        ).joinToString("&") { (key, value) ->
+            "$key=${URLEncoder.encode(value, "UTF-8")}"
+        }
+        return "$base?$params"
+    }
+
     companion object {
         private const val TAG = "OmniListener"
         private const val AGENT_RETURN_TO_WAKE_TIMEOUT_MS = 10 * 60 * 1000L
+        private const val RETURN_TO_WAKE_COOLDOWN_MS = 1500L
+        private const val TTS_FINISH_TIMEOUT_MS = 15_000L
+        private const val DEEPGRAM_WAKE_MODEL = "flux-general-en"
+        private const val DEEPGRAM_COMMAND_MODEL = "nova-2"
         const val NOTIF_ID = 1001
         const val ACTION_START_COMMAND_LISTENING = "com.omni.START_COMMAND"
         const val ACTION_START_WAKE_WORD = "com.omni.START_WAKE_WORD"

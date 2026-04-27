@@ -32,11 +32,19 @@ class AgentController private constructor(private val app: OmniApplication) {
     private val _speechLevel = MutableStateFlow(0f)
     val speechLevel: StateFlow<Float> = _speechLevel.asStateFlow()
 
+    private val _ttsActive = MutableStateFlow(false)
+    val ttsActive: StateFlow<Boolean> = _ttsActive.asStateFlow()
+
     init {
         tts = TextToSpeech(app) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale.getDefault()
                 tts?.setSpeechRate(1.1f)
+                tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) { _ttsActive.value = true }
+                    override fun onDone(utteranceId: String?) { _ttsActive.value = false }
+                    override fun onError(utteranceId: String?) { _ttsActive.value = false }
+                })
             }
         }
     }
@@ -244,7 +252,7 @@ class AgentController private constructor(private val app: OmniApplication) {
             val ttsEnabled = app.settingsRepository.ttsEnabled.first()
             if (!ttsEnabled) return@launch
             withContext(Dispatchers.Main) {
-                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "omni_agent")
             }
         }
     }

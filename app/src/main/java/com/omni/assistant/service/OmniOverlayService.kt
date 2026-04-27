@@ -223,9 +223,12 @@ class OmniOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
             setViewTreeLifecycleOwner(this@OmniOverlayService)
             setViewTreeSavedStateRegistryOwner(this@OmniOverlayService)
             setContent {
-                OverlayContent(agentController, visible) {
-                    hideOverlay()
-                }
+                OverlayContent(
+                    agentController = agentController,
+                    visibleFlow = visible,
+                    onDismiss = { hideOverlay() },
+                    onCancel = { cancelAgentAndListener() },
+                )
             }
         }
 
@@ -302,6 +305,16 @@ class OmniOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         removeOverlayView(thenStop = true)
     }
 
+    private fun cancelAgentAndListener() {
+        agentController.reset()
+        try {
+            startService(Intent(this, OmniListenerService::class.java).apply {
+                action = OmniListenerService.ACTION_STOP_COMMAND
+            })
+        } catch (_: Exception) {}
+        hideOverlay()
+    }
+
     companion object {
         const val ACTION_SHOW = "com.omni.OVERLAY_SHOW"
         const val ACTION_HIDE = "com.omni.OVERLAY_HIDE"
@@ -316,7 +329,8 @@ class OmniOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
 private fun OverlayContent(
     agentController: AgentController,
     visibleFlow: StateFlow<Boolean>,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onCancel: () -> Unit,
 ) {
     val status by agentController.status.collectAsState()
     val visible by visibleFlow.collectAsState()
@@ -332,15 +346,15 @@ private fun OverlayContent(
             targetOffsetY = { it },
         ) + fadeOut(animationSpec = tween(durationMillis = 180)),
     ) {
-    OverlayPill(status, agentController, onDismiss)
+    OverlayPill(status, onDismiss, onCancel)
     }
 }
 
 @Composable
 private fun OverlayPill(
     status: AgentStatus,
-    agentController: AgentController,
     onDismiss: () -> Unit,
+    onCancel: () -> Unit,
 ) {
 
     val statusText = when (status) {
@@ -412,8 +426,7 @@ private fun OverlayPill(
                             shape = OmniShapes.Pill,
                         )
                         .clickable {
-                            agentController.reset()
-                            onDismiss()
+                            onCancel()
                         }
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                     contentAlignment = Alignment.Center,

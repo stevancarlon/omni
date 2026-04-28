@@ -3,20 +3,41 @@ package com.omni.assistant
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.util.Log
 import com.omni.assistant.auth.AuthRepository
+import com.omni.assistant.data.AppInventory
 import com.omni.assistant.data.SettingsRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 class OmniApplication : Application() {
 
     lateinit var settingsRepository: SettingsRepository
     lateinit var authRepository: AuthRepository
+    lateinit var appInventory: AppInventory
+
+    private val appScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     override fun onCreate() {
         super.onCreate()
         instance = this
         settingsRepository = SettingsRepository(this)
         authRepository = AuthRepository(this)
+        appInventory = AppInventory(this)
         createNotificationChannels()
+
+        // Generate app inventory after user signs in
+        appScope.launch {
+            // Wait until we have a valid auth token
+            settingsRepository.authToken.first { it.isNotBlank() }
+            Log.d("OmniApp", "Auth token available, generating app inventory...")
+            val report = appInventory.getOrGenerate()
+            Log.d("OmniApp", "App inventory ready (${report.report.length} chars)")
+            Log.d("OmniApp", report.report.take(3000))
+        }
     }
 
     private fun createNotificationChannels() {

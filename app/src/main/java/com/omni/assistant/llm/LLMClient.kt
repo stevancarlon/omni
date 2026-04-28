@@ -1,7 +1,5 @@
 package com.omni.assistant.llm
 
-import android.content.Intent
-import android.content.pm.PackageManager
 import com.omni.assistant.OmniApplication
 import com.omni.assistant.data.AgentAction
 import com.google.gson.Gson
@@ -23,6 +21,7 @@ class LLMResponse(
 class LLMClient(private val app: OmniApplication) {
 
     private val gson = Gson()
+    private var cachedInventoryPrompt: String? = null
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
@@ -41,6 +40,11 @@ class LLMClient(private val app: OmniApplication) {
 
         if (authToken.isBlank()) throw IllegalStateException("Not logged in — please sign in first")
 
+        val inventoryPrompt = cachedInventoryPrompt ?: run {
+            val report = app.appInventory.getOrGenerate()
+            app.appInventory.formatForPrompt(report).also { cachedInventoryPrompt = it }
+        }
+
         val userMessage = buildString {
             appendLine("Goal: $goal")
             if (voiceCandidates.size > 1) {
@@ -48,8 +52,7 @@ class LLMClient(private val app: OmniApplication) {
                 appendLine("(Pick the interpretation that best matches an installed app or makes the most sense)")
             }
             appendLine()
-            appendLine("Installed apps:")
-            appendLine(getInstalledApps())
+            appendLine(inventoryPrompt)
             appendLine()
             appendLine("Current screen state:")
             appendLine(screenDescription.take(4000))
@@ -89,19 +92,6 @@ class LLMClient(private val app: OmniApplication) {
             ?: throw IOException("No content in backend response")
 
         return parseAgentResponse(content)
-    }
-
-    private fun getInstalledApps(): String {
-        val pm = app.packageManager
-        val launchIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val apps = pm.queryIntentActivities(launchIntent, PackageManager.MATCH_ALL)
-        return apps
-            .map { it.activityInfo }
-            .sortedBy { it.loadLabel(pm).toString().lowercase() }
-            .joinToString("\n") { info ->
-                val label = info.loadLabel(pm)
-                "${info.packageName} — $label"
-            }
     }
 
     private fun parseAgentResponse(rawJson: String): LLMResponse {

@@ -13,8 +13,9 @@ defmodule OmniBackendWeb.DeepgramController do
   """
   def create_token(conn, params) do
     api_key = Application.get_env(:omni_backend, :deepgram_api_key)
-    language = non_blank(params["language"], "en-US")
+    language = non_blank(params["language"], "en") |> normalize_language()
     model = non_blank(params["model"], "nova-3")
+    keyterms = sanitize_keyterms(params["keyterms"])
 
     # Request a short-lived JWT from Deepgram. The token only needs to be valid
     # while the client opens the websocket; the connection can outlive the TTL.
@@ -26,7 +27,7 @@ defmodule OmniBackendWeb.DeepgramController do
         json(conn, %{
           access_token: access_token,
           expires_in: body["expires_in"],
-          url: build_ws_url(model, language)
+          url: build_ws_url(model, language, keyterms)
         })
 
       {:ok, %Req.Response{status: 403, body: body}} ->
@@ -50,22 +51,49 @@ defmodule OmniBackendWeb.DeepgramController do
     end
   end
 
-  defp build_ws_url(model, language) do
-    params =
-      URI.encode_query(%{
-        "model" => model,
-        "language" => language,
-        "punctuate" => "true",
-        "interim_results" => "true",
-        "vad_events" => "true",
-        "encoding" => "linear16",
-        "sample_rate" => "16000",
-        "channels" => "1",
-        "endpointing" => "300",
-        "utterance_end_ms" => "1000"
-      })
+  defp build_ws_url(model, language, keyterms) do
+    base = [
+      {"model", model},
+      {"language", language},
+      {"punctuate", "true"},
+      {"interim_results", "true"},
+      {"vad_events", "true"},
+      {"encoding", "linear16"},
+      {"sample_rate", "16000"},
+      {"channels", "1"},
+      {"endpointing", "600"},
+      {"utterance_end_ms", "1000"},
+      {"smart_format", "true"},
+      {"filler_words", "false"},
+      {"numerals", "true"}
+    ]
 
-    "wss://api.deepgram.com/v1/listen?#{params}"
+    keyterm_pairs = Enum.map(keyterms, &{"keyterm", &1})
+
+    query =
+      (base ++ keyterm_pairs)
+      |> Enum.map(fn {k, v} -> "#{URI.encode_www_form(k)}=#{URI.encode_www_form(v)}" end)
+      |> Enum.join("&")
+
+    "wss://api.deepgram.com/v1/listen?#{query}"
+  end
+
+  defp sanitize_keyterms(list) when is_list(list) do
+    list
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+    |> Enum.take(100)
+  end
+
+  defp sanitize_keyterms(_), do: []
+
+  # Nova-3 uses base language codes ("pt", "es", "fr") not locale codes
+  # ("pt-BR", "es-ES"). Strip the region suffix so transcription actually
+  # uses the selected language instead of silently falling back to English.
+  defp normalize_language(lang) do
+    lang |> String.split(~r"[-_]") |> hd() |> String.downcase()
   end
 
   defp non_blank(value, default) when is_binary(value) do

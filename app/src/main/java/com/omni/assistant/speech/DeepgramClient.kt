@@ -22,6 +22,7 @@ class DeepgramClient(
     private val language: String = "",
     private val wakeWord: String = "hey omni",
     private val onWakeWordDetected: () -> Unit = {},
+    private val onStopWordDetected: () -> Unit = {},
     private val onPartialResult: (String) -> Unit = {},
     private val onFinalResult: (String) -> Unit = {},
     private val onCommandComplete: (String) -> Unit = {},
@@ -41,6 +42,10 @@ class DeepgramClient(
 
     private var mode: ListenMode = ListenMode.WAKE_WORD
     private val commandTranscript = StringBuilder()
+    // Pending audio buffer — captures mic bytes during the WS handshake so the
+    // user's first word isn't lost while the socket is still opening.
+    private val pendingAudio = ArrayDeque<okio.ByteString>()
+    private var pendingBytes = 0
     private val normalizedWakeWords = listOf(
         normalizePhrase(wakeWord),
         normalizePhrase("hey omni"),
@@ -83,6 +88,14 @@ class DeepgramClient(
             ignoreUntil = System.currentTimeMillis() + 150
         }
 
+        // Start mic capture IMMEDIATELY so the first word survives the WS handshake.
+        // Audio bytes are buffered in pendingAudio until wsOpen flips true.
+        synchronized(pendingAudio) {
+            pendingAudio.clear()
+            pendingBytes = 0
+        }
+        startAudioCapture(context)
+
         val request = Request.Builder()
             .url(websocketUrl)
             .header("Authorization", "Bearer $accessToken")
@@ -91,8 +104,17 @@ class DeepgramClient(
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.d(TAG, "Connected (mode=$mode)")
-                wsOpen = true
-                startAudioCapture(context)
+                synchronized(pendingAudio) {
+                    var drained = 0
+                    while (pendingAudio.isNotEmpty()) {
+                        val chunk = pendingAudio.removeFirst()
+                        webSocket.send(chunk)
+                        drained += chunk.size
+                    }
+                    pendingBytes = 0
+                    wsOpen = true
+                    Log.d(TAG, "WS open, drained ${drained / 1024}KB pre-handshake audio")
+                }
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -150,6 +172,10 @@ class DeepgramClient(
         audioRecord?.stop()
         audioRecord?.release()
         audioRecord = null
+        synchronized(pendingAudio) {
+            pendingAudio.clear()
+            pendingBytes = 0
+        }
     }
 
     // ─── Audio Capture ───────────────────────────────────────────────────────
@@ -194,6 +220,11 @@ class DeepgramClient(
             var bytesSent = 0L
             var lastLogMs = 0L
             var lastLevelMs = 0L
+            // DC offset tracker (running mean) and pre-emphasis state across reads —
+            // pre-emphasis y[n] = x[n] - 0.97*x[n-1] boosts high frequencies so
+            // consonants survive the gain/soft-clip stage.
+            var dcOffset = 0.0
+            var prevSample = 0
             while (isRecording && isActive) {
                 val read = audioRecord?.read(buffer, 0, buffer.size) ?: -1
                 if (read > 0) {
@@ -204,7 +235,14 @@ class DeepgramClient(
                     var clippedSamples = 0
                     val gain = if (mode == ListenMode.WAKE_WORD) WAKE_GAIN else COMMAND_GAIN
                     while (i < read - 1) {
-                        val sample = ((buffer[i + 1].toInt() shl 8) or (buffer[i].toInt() and 0xFF)).toShort().toInt()
+                        val raw = ((buffer[i + 1].toInt() shl 8) or (buffer[i].toInt() and 0xFF)).toShort().toInt()
+                        // DC offset removal — slowly tracking mean
+                        dcOffset = dcOffset * (1.0 - DC_ALPHA) + raw * DC_ALPHA
+                        val centered = raw - dcOffset.toInt()
+                        // Pre-emphasis filter
+                        val emphasized = centered - (PRE_EMPHASIS * prevSample).toInt()
+                        prevSample = centered
+                        val sample = emphasized
                         val boosted = sample * gain
                         // Soft-clip above SOFT_KNEE using tanh-like curve — preserves
                         // waveform shape under overload so consonants stay intelligible.
@@ -227,7 +265,24 @@ class DeepgramClient(
                         if (a > peak) peak = a
                         i += 2
                     }
-                    val sent = webSocket?.send(buffer.copyOf(read).toByteString()) ?: false
+                    val payload = buffer.copyOf(read).toByteString()
+                    var sent = false
+                    synchronized(pendingAudio) {
+                        if (wsOpen) {
+                            sent = webSocket?.send(payload) ?: false
+                        } else {
+                            // WS still handshaking — buffer locally so first word survives.
+                            pendingAudio.addLast(payload)
+                            pendingBytes += payload.size
+                            // Cap at 3 seconds (~96KB at 16kHz mono PCM16) — drop oldest
+                            // if backend/handshake is taking too long.
+                            while (pendingBytes > PENDING_MAX_BYTES && pendingAudio.size > 1) {
+                                val dropped = pendingAudio.removeFirst()
+                                pendingBytes -= dropped.size
+                            }
+                            sent = true
+                        }
+                    }
                     if (sent) bytesSent += read
                     val now = System.currentTimeMillis()
                     if (mode == ListenMode.COMMAND && now - lastLevelMs > AUDIO_LEVEL_INTERVAL_MS) {
@@ -317,11 +372,26 @@ class DeepgramClient(
     private fun handleWakeWordResult(transcript: String) {
         emptyWakeFinals = 0
         onPartialResult(transcript)
+        if (isStopWordMatch(transcript)) {
+            Log.d(TAG, "Stop word detected: \"$transcript\"")
+            onStopWordDetected()
+            return
+        }
         if (!wakeDetected && isWakeWordMatch(transcript)) {
             wakeDetected = true
             Log.d(TAG, "Wake word detected: \"$transcript\"")
             onWakeWordDetected()
         }
+    }
+
+    private fun isStopWordMatch(text: String): Boolean {
+        val normalized = normalizePhrase(text)
+        if (STOP_PHRASES.any { normalized.contains(it) }) return true
+        val words = normalized.split(" ").filter { it.isNotBlank() }
+        val stopIndex = words.indexOfFirst { it in STOP_VERBS }
+        if (stopIndex == -1 || stopIndex == words.lastIndex) return false
+        val candidate = words[stopIndex + 1]
+        return candidate in WAKE_WORD_ALIASES || editDistance(candidate, "omni") <= 2
     }
 
     private fun isWakeWordMatch(text: String): Boolean {
@@ -451,9 +521,14 @@ class DeepgramClient(
         private const val AUDIO_LEVEL_INTERVAL_MS = 50L
         private const val MAX_EMPTY_COMMAND_FINALS = 2
         private const val MAX_EMPTY_WAKE_FINALS = 6
-        private const val COMMAND_GAIN = 2
+        private const val COMMAND_GAIN = 4
         private const val WAKE_GAIN = 3
         private const val SOFT_KNEE = 24000  // start soft-clipping at ~73% of full scale
+        private const val DC_ALPHA = 0.001  // running-mean rate for DC offset tracker
+        private const val PRE_EMPHASIS = 0.97  // y[n] = x[n] - 0.97*x[n-1]
+        private const val PENDING_MAX_BYTES = 96000  // ~3s of buffered audio while WS handshakes
         private val WAKE_WORD_ALIASES = setOf("omni", "umini", "umni", "mini", "omie", "homie")
+        private val STOP_VERBS = setOf("stop", "para", "pare")
+        private val STOP_PHRASES = setOf("stop omni", "stop homie", "para omni", "pare omni")
     }
 }

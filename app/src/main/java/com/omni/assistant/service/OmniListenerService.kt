@@ -196,7 +196,9 @@ class OmniListenerService : Service() {
         scope.launch {
             val session = runCatching {
                 val model = if (mode == ListenMode.WAKE_WORD) DEEPGRAM_WAKE_MODEL else DEEPGRAM_COMMAND_MODEL
-                DeepgramSessionClient(application as OmniApplication).create(cachedSpeechLanguage, model)
+                val keyterms = if (mode == ListenMode.COMMAND) collectKeyterms() else emptyList()
+                DeepgramSessionClient(application as OmniApplication)
+                    .create(cachedSpeechLanguage, model, keyterms)
             }.getOrElse { error ->
                 Log.e(TAG, "Deepgram session error: ${error.message}")
                 if (mode == ListenMode.COMMAND && isListeningForCommand) {
@@ -223,9 +225,19 @@ class OmniListenerService : Service() {
                         }
                     }
                 },
+                onStopWordDetected = {
+                    scope.launch {
+                        Log.d(TAG, "Stop word detected — resetting agent")
+                        cancelReturnToWake()
+                        activeCommandId += 1
+                        isListeningForCommand = false
+                        agentController.reset()
+                        startWakeWordListening()
+                    }
+                },
                 onPartialResult = { partial ->
                     scope.launch {
-                        if (isListeningForCommand) {
+                        if (mode == ListenMode.COMMAND && isListeningForCommand) {
                             agentController.onTranscriptionUpdated(partial)
                             updateNotification("Hearing: \"$partial\"")
                         }
@@ -234,24 +246,28 @@ class OmniListenerService : Service() {
                 onFinalResult = { final ->
                     Log.d(TAG, "Deepgram final: $final")
                     scope.launch {
-                        if (isListeningForCommand) agentController.onTranscriptionUpdated(final)
+                        if (mode == ListenMode.COMMAND && isListeningForCommand) {
+                            agentController.onTranscriptionUpdated(final)
+                        }
                     }
                 },
                 onCommandComplete = { fullText ->
                     scope.launch {
-                        if (isListeningForCommand) {
+                        if (mode == ListenMode.COMMAND && isListeningForCommand) {
                             handleCommandResult(fullText.lowercase(), listOf(fullText.lowercase()))
                         }
                     }
                 },
                 onNoCommand = {
                     scope.launch {
-                        if (isListeningForCommand) handleNoCommand()
+                        if (mode == ListenMode.COMMAND && isListeningForCommand) handleNoCommand()
                     }
                 },
                 onAudioLevel = { level ->
                     scope.launch {
-                        if (isListeningForCommand) agentController.onSpeechLevelChanged(level)
+                        if (mode == ListenMode.COMMAND && isListeningForCommand) {
+                            agentController.onSpeechLevelChanged(level)
+                        }
                     }
                 },
                 onError = { error ->
@@ -464,6 +480,10 @@ class OmniListenerService : Service() {
         val commandId = ++activeCommandId
         cancelReturnToWake()
         agentController.onCommandReceived(command, candidates)
+
+        // Start wake word listening immediately so "Stop Omni" works during execution
+        startWakeWordListening()
+
         returnToWakeJob = scope.launch {
             var sawAgentRun = false
             withTimeoutOrNull(AGENT_RETURN_TO_WAKE_TIMEOUT_MS) {
@@ -524,6 +544,24 @@ class OmniListenerService : Service() {
         returnToWakeJob = null
     }
 
+    private fun collectKeyterms(): List<String> {
+        val terms = mutableListOf<String>()
+        // App names — what the user is most likely to invoke by voice
+        terms.addAll(appNames)
+        // Visible screen text from accessibility — current context (page titles, buttons,
+        // search results, contact names, app-specific terms like artist names in Spotify)
+        OmniAccessibilityService.instance?.getScreenElements()?.forEach { el ->
+            el.text?.takeIf { it.isNotBlank() }?.let { terms.add(it) }
+            el.contentDescription?.takeIf { it.isNotBlank() }?.let { terms.add(it) }
+        }
+        return terms
+            .map { it.trim() }
+            .filter { it.length in 2..40 }
+            .map { it.replace(Regex("\\s+"), " ") }
+            .distinct()
+            .take(100)
+    }
+
     private fun prepareDeepgramUrl(url: String, mode: ListenMode): String {
         if (mode != ListenMode.WAKE_WORD) return url
         val base = if (url.contains("/v1/listen")) {
@@ -538,6 +576,7 @@ class OmniListenerService : Service() {
             "eot_timeout_ms" to "1000",
             "keyterm" to "Omni",
             "keyterm" to "Hey Omni",
+            "keyterm" to "Stop Omni",
         ).joinToString("&") { (key, value) ->
             "$key=${URLEncoder.encode(value, "UTF-8")}"
         }
@@ -550,7 +589,7 @@ class OmniListenerService : Service() {
         private const val RETURN_TO_WAKE_COOLDOWN_MS = 1500L
         private const val TTS_FINISH_TIMEOUT_MS = 15_000L
         private const val DEEPGRAM_WAKE_MODEL = "flux-general-en"
-        private const val DEEPGRAM_COMMAND_MODEL = "nova-2"
+        private const val DEEPGRAM_COMMAND_MODEL = "nova-3"
         const val NOTIF_ID = 1001
         const val ACTION_START_COMMAND_LISTENING = "com.omni.START_COMMAND"
         const val ACTION_START_WAKE_WORD = "com.omni.START_WAKE_WORD"

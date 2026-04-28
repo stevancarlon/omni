@@ -23,10 +23,20 @@ class DeepgramSessionClient(private val app: OmniApplication) {
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
-    suspend fun create(language: String, model: String = "nova-2"): DeepgramSession = withContext(Dispatchers.IO) {
+    suspend fun create(
+        language: String,
+        model: String = "nova-2",
+        keyterms: List<String> = emptyList(),
+    ): DeepgramSession = withContext(Dispatchers.IO) {
         val backendUrl = app.settingsRepository.backendUrl.first().trimEnd('/')
         val authToken = app.settingsRepository.authToken.first()
-        val body = gson.toJson(mapOf("language" to language, "model" to model))
+        val body = gson.toJson(
+            mapOf(
+                "language" to language,
+                "model" to model,
+                "keyterms" to keyterms,
+            )
+        )
 
         val request = Request.Builder()
             .url("$backendUrl/api/deepgram/token")

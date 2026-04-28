@@ -35,6 +35,9 @@ class SettingsRepository(private val context: Context) {
 
         val DEFAULT_BACKEND_URL = BuildConfig.DEFAULT_BACKEND_URL
         private const val LEGACY_DEFAULT_BACKEND_URL = "http://192.168.2.111:4000"
+        private val LEGACY_NGROK_URLS = setOf(
+            "https://9949-186-225-237-108.ngrok-free.app",
+        )
 
         const val DEFAULT_SYSTEM_PROMPT = """You are Omni, an AI assistant that controls an Android device on behalf of the user.
 You receive the current screen state as a list of UI elements, and you must decide what action to take to accomplish the user's goal.
@@ -74,6 +77,7 @@ Be precise, methodical, and always verify your actions match the screen state be
         when {
             storedBackendUrl.isNullOrBlank() -> DEFAULT_BACKEND_URL
             storedBackendUrl == LEGACY_DEFAULT_BACKEND_URL -> DEFAULT_BACKEND_URL
+            storedBackendUrl in LEGACY_NGROK_URLS -> DEFAULT_BACKEND_URL
             else -> storedBackendUrl
         }
     }

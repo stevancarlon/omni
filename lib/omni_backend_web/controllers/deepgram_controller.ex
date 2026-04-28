@@ -13,7 +13,7 @@ defmodule OmniBackendWeb.DeepgramController do
   """
   def create_token(conn, params) do
     api_key = Application.get_env(:omni_backend, :deepgram_api_key)
-    language = non_blank(params["language"], "en") |> normalize_language()
+    language = non_blank(params["language"], "multi") |> normalize_language()
     model = non_blank(params["model"], "nova-3")
     keyterms = sanitize_keyterms(params["keyterms"])
 
@@ -92,6 +92,7 @@ defmodule OmniBackendWeb.DeepgramController do
   # Nova-3 uses base language codes ("pt", "es", "fr") not locale codes
   # ("pt-BR", "es-ES"). Strip the region suffix so transcription actually
   # uses the selected language instead of silently falling back to English.
+  defp normalize_language("multi"), do: "multi"
   defp normalize_language(lang) do
     lang |> String.split(~r"[-_]") |> hd() |> String.downcase()
   end

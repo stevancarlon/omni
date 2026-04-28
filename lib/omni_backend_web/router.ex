@@ -32,6 +32,9 @@ defmodule OmniBackendWeb.Router do
     get "/auth/me", AuthController, :me
     delete "/auth/logout", AuthController, :logout
 
+    # App inventory report (LLM-generated, no subscription required)
+    post "/apps/inventory", AppInventoryController, :generate
+
     # Billing
     get "/billing/status", BillingController, :status
     post "/billing/google/verify", BillingController, :verify_google

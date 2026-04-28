@@ -47,6 +47,11 @@ class OmniListenerService : Service() {
     private var cachedSpeechLanguage = ""
     private var cachedWakeWord = "hey omni"
 
+    // Pre-provisioned command session — fetched during wake word mode
+    // so there's no delay when the wake word fires.
+    private var preProvisionedSession: com.omni.assistant.speech.DeepgramSession? = null
+    private var preProvisionJob: Job? = null
+
     override fun onCreate() {
         super.onCreate()
         agentController = AgentController.getInstance(application as OmniApplication)
@@ -147,6 +152,7 @@ class OmniListenerService : Service() {
         speechRecognizer?.destroy()
         speechRecognizer = null
         startOrSwitchDeepgram(ListenMode.WAKE_WORD)
+        preProvisionCommandSession()
     }
 
     private fun startCommandListening() {
@@ -179,6 +185,22 @@ class OmniListenerService : Service() {
 
     // ─── Deepgram ────────────────────────────────────────────────────────────
 
+    private fun preProvisionCommandSession() {
+        preProvisionJob?.cancel()
+        preProvisionedSession = null
+        preProvisionJob = scope.launch {
+            val session = runCatching {
+                val keyterms = collectKeyterms()
+                DeepgramSessionClient(application as OmniApplication)
+                    .create(cachedSpeechLanguage, DEEPGRAM_COMMAND_MODEL, keyterms)
+            }.getOrNull()
+            if (session != null) {
+                preProvisionedSession = session
+                Log.d(TAG, "Command session pre-provisioned")
+            }
+        }
+    }
+
     private fun startOrSwitchDeepgram(mode: ListenMode) {
         val existing = deepgramClient
         if (mode == activeDeepgramMode && existing != null && existing.isConnected) {
@@ -194,21 +216,26 @@ class OmniListenerService : Service() {
         val requestId = ++deepgramRequestId
 
         scope.launch {
-            val session = runCatching {
-                val model = if (mode == ListenMode.WAKE_WORD) DEEPGRAM_WAKE_MODEL else DEEPGRAM_COMMAND_MODEL
-                val keyterms = if (mode == ListenMode.COMMAND) collectKeyterms() else emptyList()
-                DeepgramSessionClient(application as OmniApplication)
-                    .create(cachedSpeechLanguage, model, keyterms)
-            }.getOrElse { error ->
-                Log.e(TAG, "Deepgram session error: ${error.message}")
-                if (mode == ListenMode.COMMAND && isListeningForCommand) {
-                    Log.d(TAG, "Falling back to built-in recognizer for command")
-                    updateNotification("Listening... speak your command")
-                    startBuiltinRecognizer(wakeWordMode = false)
-                } else {
-                    updateNotification("Speech unavailable: ${error.message}")
+            val session = if (mode == ListenMode.COMMAND && preProvisionedSession != null) {
+                Log.d(TAG, "Using pre-provisioned command session")
+                preProvisionedSession!!.also { preProvisionedSession = null }
+            } else {
+                runCatching {
+                    val model = if (mode == ListenMode.WAKE_WORD) DEEPGRAM_WAKE_MODEL else DEEPGRAM_COMMAND_MODEL
+                    val keyterms = if (mode == ListenMode.COMMAND) collectKeyterms() else emptyList()
+                    DeepgramSessionClient(application as OmniApplication)
+                        .create(cachedSpeechLanguage, model, keyterms)
+                }.getOrElse { error ->
+                    Log.e(TAG, "Deepgram session error: ${error.message}")
+                    if (mode == ListenMode.COMMAND && isListeningForCommand) {
+                        Log.d(TAG, "Falling back to built-in recognizer for command")
+                        updateNotification("Listening... speak your command")
+                        startBuiltinRecognizer(wakeWordMode = false)
+                    } else {
+                        updateNotification("Speech unavailable: ${error.message}")
+                    }
+                    return@launch
                 }
-                return@launch
             }
             if (requestId != deepgramRequestId) return@launch
             activeDeepgramMode = mode

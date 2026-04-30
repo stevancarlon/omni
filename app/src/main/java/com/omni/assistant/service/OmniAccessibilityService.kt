@@ -557,13 +557,30 @@ class OmniAccessibilityService : AccessibilityService() {
         if (suspended.value) return null
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
 
-        // Get interactive elements
+        // Get interactive elements, deduplicate overlapping ones
         val elements = getScreenElements()
-        val interactive = elements.filter { el ->
+        val raw = elements.filter { el ->
             val hasContent = !el.text.isNullOrBlank() || !el.contentDescription.isNullOrBlank()
             val isInteractive = el.isClickable || el.isEditable || el.isScrollable
-            (hasContent || isInteractive) && el.bounds != null
+            (hasContent || isInteractive) && el.bounds != null &&
+                el.bounds!!.let { b -> b.right > b.left && b.bottom > b.top } // skip zero-size
         }
+        // Deduplicate: skip marks too close to an existing one (within 30px)
+        val interactive = mutableListOf<ScreenElement>()
+        val usedCenters = mutableListOf<Pair<Int, Int>>()
+        for (el in raw) {
+            val b = el.bounds!!
+            val cx = b.centerX; val cy = b.centerY
+            val tooClose = usedCenters.any { (ox, oy) ->
+                kotlin.math.abs(cx - ox) < 30 && kotlin.math.abs(cy - oy) < 30
+            }
+            if (!tooClose) {
+                interactive.add(el)
+                usedCenters.add(cx to cy)
+            }
+        }
+        // Cap at 40 marks max to keep the legend readable
+        val capped = interactive.take(40)
 
         // Capture screenshot
         var rawBitmap: Bitmap? = null
@@ -630,10 +647,10 @@ class OmniAccessibilityService : AccessibilityService() {
         }
 
         val legend = StringBuilder()
-        if (interactive.isEmpty()) {
+        if (capped.isEmpty()) {
             legend.appendLine("(No interactive elements detected — screen may be loading. Try wait or press_back.)")
         }
-        interactive.forEachIndexed { index, el ->
+        capped.forEachIndexed { index, el ->
             val b = el.bounds ?: return@forEachIndexed
             val markNum = index + 1
             val cx = b.centerX * scale

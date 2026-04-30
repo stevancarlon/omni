@@ -24,9 +24,14 @@ class SpeechCorrector(appNames: List<String>) {
         }
 
     private val skipWords = setOf(
+        // English
         "open", "play", "on", "the", "a", "an", "in", "my", "to", "and",
         "please", "hey", "omni", "start", "launch", "close", "stop",
-        "go", "show", "find", "search", "use", "run", "with", "for"
+        "go", "show", "find", "search", "use", "run", "with", "for",
+        // Portuguese
+        "abra", "abre", "abrir", "no", "na", "do", "da", "de", "um", "uma",
+        "manda", "mandar", "enviar", "envia", "pede", "pedir", "toca", "tocar",
+        "para", "por", "com", "esse", "essa", "este", "esta", "meu", "minha"
     )
 
     fun correct(text: String): String {

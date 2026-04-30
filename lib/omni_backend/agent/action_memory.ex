@@ -7,7 +7,7 @@ defmodule OmniBackend.Agent.ActionMemory do
 
   schema "action_memories" do
     field :goal_text, :string
-    field :action_sequence, {:array, :map}
+    field :action_sequence, {:array, :map}, default: []
     field :app_context, :string
     field :steps_taken, :integer
     field :success, :boolean, default: true

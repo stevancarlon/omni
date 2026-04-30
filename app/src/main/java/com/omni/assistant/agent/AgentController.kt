@@ -138,6 +138,8 @@ class AgentController private constructor(private val app: OmniApplication) {
         val recentActions = mutableListOf<String>()
         // Track executed actions for MobileRAG memory
         val executedActions = mutableListOf<Map<String, Any?>>()
+        // Track the primary app context (first non-Omni foreground app)
+        var targetApp = ""
 
         _status.value = AgentStatus.Processing(goal)
         addLog("Starting task: $goal")
@@ -197,6 +199,10 @@ class AgentController private constructor(private val app: OmniApplication) {
             lastScreenHash = screenHash
 
             val fgApp = OmniAccessibilityService.foregroundPackage.value
+            // Track the target app (first non-Omni app we enter)
+            if (targetApp.isBlank() && fgApp.isNotBlank() && fgApp != "com.omni.assistant") {
+                targetApp = fgApp
+            }
 
             _status.value = AgentStatus.Executing(goal, step, maxSteps, "Thinking...")
             addLog("Step $step: ${screenLegend.lines().size} marks in $fgApp${if (screenshot != null) " + screenshot" else ""}")
@@ -228,7 +234,7 @@ class AgentController private constructor(private val app: OmniApplication) {
                 if (done.success && executedActions.isNotEmpty()) {
                     scope.launch {
                         try {
-                            llmClient.saveMemory(goal, executedActions, fgApp, step)
+                            llmClient.saveMemory(goal, executedActions, targetApp.ifBlank { fgApp }, step)
                             addLog("Memory saved: $goal (${executedActions.size} actions)")
                         } catch (e: Exception) {
                             Log.w("AgentController", "Memory save failed: ${e.message}")

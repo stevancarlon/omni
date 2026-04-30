@@ -54,6 +54,10 @@ defmodule OmniBackendWeb.Router do
 
     # Whisper transcription
     post "/speech/transcribe", WhisperController, :transcribe
+
+    # Agent action memories (MobileRAG)
+    post "/agent/memories", MemoryController, :create
+    get "/agent/memories/search", MemoryController, :search
   end
 
   # Enable LiveDashboard in development

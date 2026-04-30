@@ -9,47 +9,35 @@ defmodule OmniBackendWeb.LLMController do
   { "messages": [...], "system": "..." }
   → { "content": "..." }
   """
+  @providers %{
+    "claude" => OmniBackend.LLM.Claude,
+    "openai" => OmniBackend.LLM.OpenAI,
+    "groq" => OmniBackend.LLM.Groq
+  }
+
   def completions(conn, params) do
     _user = conn.assigns.current_user
     messages = params["messages"] || []
-    system = params["system"]
-    model = params["model"] || Application.get_env(:omni_backend, :default_llm_model)
+    system = params["system"] || "You are Omni, an AI assistant that controls Android devices. Respond only with valid JSON."
+    model = params["model"]
+    provider_name = params["provider"] || Application.get_env(:omni_backend, :default_llm_provider, "claude")
 
-    api_key = Application.get_env(:omni_backend, :groq_api_key)
+    provider = Map.get(@providers, provider_name)
 
-    case Req.post("https://api.groq.com/openai/v1/chat/completions",
-           headers: [
-             {"authorization", "Bearer #{api_key}"},
-             {"content-type", "application/json"}
-           ],
-           json: %{
-             model: model,
-             temperature: 0.2,
-             max_completion_tokens: 4096,
-             messages: chat_messages(messages, system),
-             response_format: %{type: "json_object"}
-           }
-         ) do
-      {:ok, %Req.Response{status: 200, body: resp_body}} ->
-        content =
-          resp_body
-          |> Map.get("choices", [])
-          |> Enum.find_value(fn
-            %{"message" => %{"content" => text}} -> text
-            _ -> nil
-          end)
+    if is_nil(provider) do
+      conn
+      |> put_status(:bad_request)
+      |> json(%{error: "unknown_provider", detail: "Valid providers: #{@providers |> Map.keys() |> Enum.join(", ")}"})
+    else
+      case provider.completions(model, system, messages) do
+        {:ok, content} ->
+          json(conn, %{content: content})
 
-        json(conn, %{content: content || ""})
-
-      {:ok, %Req.Response{status: status, body: resp_body}} ->
-        conn
-        |> put_status(:bad_gateway)
-        |> json(%{error: "llm_error", status: status, detail: resp_body})
-
-      {:error, reason} ->
-        conn
-        |> put_status(:bad_gateway)
-        |> json(%{error: "llm_unreachable", detail: inspect(reason)})
+        {:error, reason} ->
+          conn
+          |> put_status(:bad_gateway)
+          |> json(%{error: "llm_error", detail: reason})
+      end
     end
   end
 
@@ -121,7 +109,7 @@ defmodule OmniBackendWeb.LLMController do
       "https://api.anthropic.com/v1/messages",
       [
         {"x-api-key", api_key},
-        {"anthropic-version", "2023-06-01"},
+        {"anthropic-version", "2025-04-14"},
         {"content-type", "application/json"}
       ],
       %{
@@ -137,11 +125,12 @@ defmodule OmniBackendWeb.LLMController do
   defp build_request("openai", model, messages, system) do
     api_key = Application.get_env(:omni_backend, :openai_api_key)
     sys_msg = if system, do: [%{role: "system", content: system}], else: []
+    converted = Enum.map(messages, &OmniBackend.LLM.OpenAI.convert_message/1)
 
     {
       "https://api.openai.com/v1/chat/completions",
       [{"authorization", "Bearer #{api_key}"}, {"content-type", "application/json"}],
-      %{model: model || "gpt-4o", stream: true, messages: sys_msg ++ messages}
+      %{model: model || "gpt-4o", stream: true, messages: sys_msg ++ converted}
     }
   end
 

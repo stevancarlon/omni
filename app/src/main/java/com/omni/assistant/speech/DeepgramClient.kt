@@ -42,6 +42,8 @@ class DeepgramClient(
 
     private var mode: ListenMode = ListenMode.WAKE_WORD
     private val commandTranscript = StringBuilder()
+    // Full command audio buffer — raw PCM sent to Whisper for accurate transcription
+    private val commandAudioBuffer = java.io.ByteArrayOutputStream()
     // Pending audio buffer — captures mic bytes during the WS handshake so the
     // user's first word isn't lost while the socket is still opening.
     private val pendingAudio = ArrayDeque<okio.ByteString>()
@@ -69,6 +71,15 @@ class DeepgramClient(
 
     val isConnected: Boolean get() = wsOpen && isRecording
 
+    /** Returns the buffered command audio (raw PCM16, 16kHz mono) and clears the buffer. */
+    fun getCommandAudio(): ByteArray {
+        synchronized(commandAudioBuffer) {
+            val data = commandAudioBuffer.toByteArray()
+            commandAudioBuffer.reset()
+            return data
+        }
+    }
+
     // ─── Public API ──────────────────────────────────────────────────────────
 
     fun start(context: Context, initialMode: ListenMode = ListenMode.WAKE_WORD) {
@@ -81,6 +92,7 @@ class DeepgramClient(
         mode = initialMode
         intentionallyStopping = false
         commandTranscript.clear()
+        synchronized(commandAudioBuffer) { commandAudioBuffer.reset() }
         noCommandReported = false
         wakeDetected = initialMode != ListenMode.WAKE_WORD
         if (initialMode == ListenMode.COMMAND) {
@@ -266,6 +278,12 @@ class DeepgramClient(
                         i += 2
                     }
                     val payload = buffer.copyOf(read).toByteString()
+                    // Buffer raw PCM for Whisper transcription in command mode
+                    if (mode == ListenMode.COMMAND) {
+                        synchronized(commandAudioBuffer) {
+                            commandAudioBuffer.write(buffer, 0, read)
+                        }
+                    }
                     var sent = false
                     synchronized(pendingAudio) {
                         if (wsOpen) {

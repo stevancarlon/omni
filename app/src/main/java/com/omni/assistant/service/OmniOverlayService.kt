@@ -87,8 +87,18 @@ class OmniOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
     // the agent state natively, so the floating pill would just get in the way.
     private val foregroundObserver = object : DefaultLifecycleObserver {
         override fun onStart(owner: LifecycleOwner) {
-            // App went foreground — hide the overlay view (keep service alive).
-            removeOverlayView()
+            // App went foreground — hide the overlay view (keep service alive),
+            // but only if the agent isn't actively working. During execution the
+            // user may briefly pass through Omni while navigating between apps;
+            // removing the overlay here would kill the executing/done indicator.
+            val status = agentController.status.value
+            val agentBusy = status is AgentStatus.Processing ||
+                status is AgentStatus.Executing ||
+                status is AgentStatus.Done ||
+                status is AgentStatus.Error
+            if (!agentBusy) {
+                removeOverlayView()
+            }
         }
 
         override fun onStop(owner: LifecycleOwner) {

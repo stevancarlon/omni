@@ -178,18 +178,28 @@ private fun FallbackOrb(status: AgentStatus, modifier: Modifier, performance: Om
             val tint = when (status) {
                 is AgentStatus.Done -> if (status.success) OmniColors.Success else OmniColors.Error
                 is AgentStatus.Error -> OmniColors.Error
+                is AgentStatus.Executing -> Color(0xFFFF9800)
                 else -> null
             }
             if (tint != null) drawSolidOrb(cx, cy, r, tint)
             else drawNavyOrb(cx, cy, r)
 
             when (status) {
-                is AgentStatus.Processing, is AgentStatus.Executing ->
+                is AgentStatus.Processing ->
                     rotate(rotation, pivot = Offset(cx, cy)) {
                         drawDashedRing(
                             Offset(cx, cy),
                             r * 1.18f,
                             Color(0xFF6CB8FF).copy(alpha = 0.7f),
+                            2.2f, 28f, 18f,
+                        )
+                    }
+                is AgentStatus.Executing ->
+                    rotate(rotation, pivot = Offset(cx, cy)) {
+                        drawDashedRing(
+                            Offset(cx, cy),
+                            r * 1.18f,
+                            Color(0xFFFF9800).copy(alpha = 0.7f),
                             2.2f, 28f, 18f,
                         )
                     }

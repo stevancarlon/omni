@@ -65,7 +65,7 @@ class LLMClient(private val app: OmniApplication) {
         return callBackend(backendUrl, authToken, systemPrompt, messages)
     }
 
-    private fun callBackend(
+    private suspend fun callBackend(
         backendUrl: String,
         authToken: String,
         systemPrompt: String,
@@ -83,7 +83,18 @@ class LLMClient(private val app: OmniApplication) {
             .header("Content-Type", "application/json")
             .build()
 
-        val response = client.newCall(request).execute()
+        val call = client.newCall(request)
+        val response = kotlinx.coroutines.suspendCancellableCoroutine<Response> { cont ->
+            cont.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: java.io.IOException) {
+                    if (cont.isActive) cont.resumeWith(Result.failure(e))
+                }
+                override fun onResponse(call: Call, response: Response) {
+                    cont.resumeWith(Result.success(response))
+                }
+            })
+        }
         val responseBody = response.body?.string() ?: throw IOException("Empty response")
         if (!response.isSuccessful) throw IOException("Backend error ${response.code}: $responseBody")
 

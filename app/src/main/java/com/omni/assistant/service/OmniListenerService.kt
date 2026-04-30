@@ -16,9 +16,11 @@ import androidx.core.app.NotificationCompat
 import com.omni.assistant.OmniApplication
 import com.omni.assistant.agent.AgentController
 import com.omni.assistant.data.AgentStatus
+import com.omni.assistant.speech.AudioRecorder
 import com.omni.assistant.speech.DeepgramClient
 import com.omni.assistant.speech.DeepgramSessionClient
 import com.omni.assistant.speech.ListenMode
+import com.omni.assistant.speech.WhisperClient
 import com.omni.assistant.ui.MainActivity
 import com.omni.assistant.util.SpeechCorrector
 import kotlinx.coroutines.*
@@ -30,6 +32,7 @@ class OmniListenerService : Service() {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var speechRecognizer: SpeechRecognizer? = null
     private var deepgramClient: DeepgramClient? = null
+    private var commandRecorder: AudioRecorder? = null
     private var isListeningForWakeWord = false
     private var isListeningForCommand = false
     private var startedFromWakeWord = false
@@ -85,6 +88,8 @@ class OmniListenerService : Service() {
                     cancelReturnToWake()
                     activeCommandId += 1
                     isListeningForCommand = false
+                    commandRecorder?.stop()
+                    commandRecorder = null
                     agentController.reset()
                     startWakeWordListening()
                 }
@@ -149,6 +154,8 @@ class OmniListenerService : Service() {
         isListeningForWakeWord = true
         isListeningForCommand = false
         updateNotification("Listening for \"$cachedWakeWord\"...")
+        commandRecorder?.stop()
+        commandRecorder = null
         speechRecognizer?.destroy()
         speechRecognizer = null
         startOrSwitchDeepgram(ListenMode.WAKE_WORD)
@@ -161,13 +168,43 @@ class OmniListenerService : Service() {
         isListeningForCommand = true
         updateNotification("Listening... speak your command")
 
-        if (useDeepgramForAll) {
-            speechRecognizer?.destroy()
-            speechRecognizer = null
-            startOrSwitchDeepgram(ListenMode.COMMAND)
-        } else {
-            startBuiltinRecognizer(wakeWordMode = false)
-        }
+        // Stop wake word listener — mic can't be shared
+        deepgramClient?.stop()
+        deepgramClient = null
+        activeDeepgramMode = null
+        speechRecognizer?.destroy()
+        speechRecognizer = null
+
+        // Record audio locally, then send to Whisper for transcription
+        commandRecorder = AudioRecorder(
+            onAudioLevel = { level ->
+                scope.launch {
+                    if (isListeningForCommand) {
+                        agentController.onSpeechLevelChanged(level)
+                    }
+                }
+            },
+            onSilenceTimeout = { audio ->
+                if (isListeningForCommand) {
+                    isListeningForCommand = false
+                    updateNotification("Transcribing...")
+                    agentController.onTranscriptionUpdated("Transcribing...")
+                    scope.launch {
+                        val result = WhisperClient(application as OmniApplication)
+                            .transcribe(audio, cachedSpeechLanguage)
+                        if (result != null && result.text.isNotBlank()) {
+                            Log.d(TAG, "Whisper: \"${result.text}\" (lang=${result.language})")
+                            val text = result.text.lowercase()
+                            handleCommandResult(text, listOf(text))
+                        } else {
+                            Log.d(TAG, "Whisper returned empty, no command")
+                            handleNoCommand()
+                        }
+                    }
+                }
+            },
+        )
+        commandRecorder?.start(this)
     }
 
     private fun shutdown() {
@@ -178,6 +215,8 @@ class OmniListenerService : Service() {
         speechRecognizer = null
         deepgramClient?.stop()
         deepgramClient = null
+        commandRecorder?.stop()
+        commandRecorder = null
         activeDeepgramMode = null
         hideOverlay()
         stopSelf()
@@ -278,10 +317,27 @@ class OmniListenerService : Service() {
                         }
                     }
                 },
-                onCommandComplete = { fullText ->
+                onCommandComplete = { deepgramText ->
                     scope.launch {
                         if (mode == ListenMode.COMMAND && isListeningForCommand) {
-                            handleCommandResult(fullText.lowercase(), listOf(fullText.lowercase()))
+                            // Grab buffered audio and send to Whisper for better accuracy
+                            val audio = deepgramClient?.getCommandAudio()
+                            if (audio != null && audio.size > 6400) { // >0.2s of audio
+                                Log.d(TAG, "Sending ${audio.size / 1024}KB to Whisper (Deepgram: \"$deepgramText\")")
+                                agentController.onTranscriptionUpdated("$deepgramText (refining...)")
+                                val whisperResult = WhisperClient(application as OmniApplication)
+                                    .transcribe(audio, cachedSpeechLanguage)
+                                if (whisperResult != null && whisperResult.text.isNotBlank()) {
+                                    Log.d(TAG, "Whisper result: \"${whisperResult.text}\" (Deepgram was: \"$deepgramText\")")
+                                    val text = whisperResult.text.lowercase()
+                                    handleCommandResult(text, listOf(text, deepgramText.lowercase()))
+                                } else {
+                                    Log.d(TAG, "Whisper failed, falling back to Deepgram")
+                                    handleCommandResult(deepgramText.lowercase(), listOf(deepgramText.lowercase()))
+                                }
+                            } else {
+                                handleCommandResult(deepgramText.lowercase(), listOf(deepgramText.lowercase()))
+                            }
                         }
                     }
                 },

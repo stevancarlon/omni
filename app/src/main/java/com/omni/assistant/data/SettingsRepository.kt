@@ -37,6 +37,9 @@ class SettingsRepository(private val context: Context) {
         private const val LEGACY_DEFAULT_BACKEND_URL = "http://192.168.2.111:4000"
         private val LEGACY_NGROK_URLS = setOf(
             "https://9949-186-225-237-108.ngrok-free.app",
+            "https://ceea-186-225-237-15.ngrok-free.app",
+            "https://97aa-2804-77c-910b-c101-f67f-e92c-fb18-e040.ngrok-free.app",
+            "https://7721-186-225-237-17.ngrok-free.app",
         )
 
         const val DEFAULT_SYSTEM_PROMPT = """You are Omni, an AI assistant that controls an Android device on behalf of the user.

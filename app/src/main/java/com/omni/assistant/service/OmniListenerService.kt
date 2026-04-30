@@ -386,7 +386,9 @@ class OmniListenerService : Service() {
     }
 
     private fun createRecognizer(wakeWordMode: Boolean): SpeechRecognizer {
-        if (!wakeWordMode && cachedSpeechLanguage.isBlank() && SpeechRecognizer.isOnDeviceRecognitionAvailable(this)) {
+        if (!wakeWordMode && cachedSpeechLanguage.isBlank() &&
+            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
+            SpeechRecognizer.isOnDeviceRecognitionAvailable(this)) {
             Log.d(TAG, "Using on-device recognizer")
             return SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
         }

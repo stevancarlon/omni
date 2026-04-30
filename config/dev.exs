@@ -20,6 +20,7 @@ config :omni_backend, OmniBackend.Repo,
 config :omni_backend, OmniBackendWeb.Endpoint,
   # Bind to all interfaces so physical Android devices on the LAN can reach it.
   http: [ip: {0, 0, 0, 0}],
+  url: [host: "cbdb-186-225-237-17.ngrok-free.app", scheme: "https", port: 443],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,

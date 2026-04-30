@@ -51,6 +51,9 @@ defmodule OmniBackendWeb.Router do
 
     # Deepgram session token
     post "/deepgram/token", DeepgramController, :create_token
+
+    # Whisper transcription
+    post "/speech/transcribe", WhisperController, :transcribe
   end
 
   # Enable LiveDashboard in development

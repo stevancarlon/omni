@@ -29,6 +29,15 @@ defmodule OmniBackendWeb.LLMController do
       |> put_status(:bad_request)
       |> json(%{error: "unknown_provider", detail: "Valid providers: #{@providers |> Map.keys() |> Enum.join(", ")}"})
     else
+      has_images = Enum.any?(messages, fn msg ->
+        case msg["content"] do
+          content when is_list(content) -> Enum.any?(content, fn b -> b["type"] == "image" end)
+          _ -> false
+        end
+      end)
+      require Logger
+      Logger.info("LLM request: provider=#{provider_name} model=#{model || "default"} msgs=#{length(messages)} images=#{has_images}")
+
       case provider.completions(model, system, messages) do
         {:ok, content} ->
           json(conn, %{content: content})

@@ -335,7 +335,7 @@ float4 sParams(int s, float t){
   else if (s == 1){ speed = 1.35; ampO = 1.15 + 0.25*abs(sin(t*5.5)); hue = -0.10; }
   else if (s == 2){ speed = 1.00; ampO = 0.95; hue = 0.04; }
   else if (s == 3){ speed = 1.20; ampO = 1.00 + 0.20*sin(t*8.0); hue = -0.04; }
-  else if (s == 4){ speed = 1.05; ampO = 1.00 + 0.15*sin(t*6.0); hue = 0.03; sat = 1.00; }
+  else if (s == 4){ speed = 1.05; ampO = 1.00 + 0.15*sin(t*6.0); hue = 0.0; sat = 1.00; }
   else if (s == 5){ speed = 1.10; ampO = 0.90 + 0.20*smoothstep(0.0, 0.6, sin(t*0.8)); hue = 0.30; sat = 0.95; }
   else if (s == 6){ speed = 0.70; ampO = 0.70; hue = 0.60; sat = 1.00; }
   else { speed = 0.30; ampO = 0.55; hue = 0.00; sat = 0.15; }
@@ -414,11 +414,20 @@ float3 stars(float2 p, float t, float ampI){
       streak = exp(effAlong / streakLen) * exp(-(perp*perp) / (streakW*streakW + 1e-6));
     }
     float halo = exp(-dd / (baseSize*baseSize * 14.0 + 1e-6)) * pow(closeness, 2.0) * 0.30;
-    float3 colFringe = float3(0.38, 0.66, 1.00);
-    float3 colCore   = mix(float3(0.80, 0.92, 1.00), float3(0.97, 0.99, 1.00), closeness);
-    float3 colMid    = mix(colFringe, colCore, 0.55);
-    float3 colStreak = float3(0.48, 0.78, 1.00);
-    float3 colHalo   = float3(0.32, 0.62, 1.00);
+    float3 colFringe, colCore, colMid, colStreak, colHalo;
+    if (uState == 4) {
+      colFringe = float3(1.00, 0.55, 0.10);
+      colCore   = mix(float3(1.00, 0.80, 0.40), float3(1.00, 0.95, 0.70), closeness);
+      colMid    = mix(colFringe, colCore, 0.55);
+      colStreak = float3(1.00, 0.60, 0.15);
+      colHalo   = float3(1.00, 0.50, 0.05);
+    } else {
+      colFringe = float3(0.38, 0.66, 1.00);
+      colCore   = mix(float3(0.80, 0.92, 1.00), float3(0.97, 0.99, 1.00), closeness);
+      colMid    = mix(colFringe, colCore, 0.55);
+      colStreak = float3(0.48, 0.78, 1.00);
+      colHalo   = float3(0.32, 0.62, 1.00);
+    }
     acc += colFringe * head     * brightness * 0.85;
     acc += colMid    * headMid  * brightness * 1.15;
     acc += colCore   * headCore * brightness * 1.30;
@@ -457,9 +466,16 @@ half4 main(float2 fragCoord) {
   float sat = sp4.w;
   float t = uTime * tSpeed;
 
-  float3 cDeep = float3(0.055, 0.110, 0.227);
-  float3 cMid  = float3(0.184, 0.373, 0.721);
-  float3 cRim  = float3(0.498, 0.753, 1.000);
+  float3 cDeep, cMid, cRim;
+  if (uState == 4) {
+    cDeep = float3(0.227, 0.110, 0.020);
+    cMid  = float3(0.721, 0.373, 0.020);
+    cRim  = float3(1.000, 0.596, 0.000);
+  } else {
+    cDeep = float3(0.055, 0.110, 0.227);
+    cMid  = float3(0.184, 0.373, 0.721);
+    cRim  = float3(0.498, 0.753, 1.000);
+  }
 
   float sR = 0.60;
   float dist = length(p);

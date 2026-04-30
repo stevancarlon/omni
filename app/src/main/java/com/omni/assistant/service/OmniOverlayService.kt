@@ -370,7 +370,7 @@ private fun OverlayPill(
     val statusText = when (status) {
         is AgentStatus.VoiceListening -> "Listening\u2026"
         is AgentStatus.Processing -> "Thinking\u2026"
-        is AgentStatus.Executing -> "Step ${status.step}/${status.maxSteps}"
+        is AgentStatus.Executing -> "Step ${status.step}/${status.maxSteps} · ${status.lastAction}"
         is AgentStatus.Done -> if (status.success) "Done!" else status.reason
         is AgentStatus.Error -> "Error"
         else -> "Omni"

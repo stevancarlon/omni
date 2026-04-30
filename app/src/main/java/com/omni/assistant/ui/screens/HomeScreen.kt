@@ -516,7 +516,10 @@ private fun WaveformBars(
         ),
         label = "speech-waveform-phase",
     )
-    val gatedLevel = if (active) ((level - 0.12f) / 0.88f).coerceIn(0f, 1f) else 0f
+    // Boost the raw mic level so normal speech drives visible bars.
+    // Raw peaks are typically 0.06–0.25; sqrt compresses that to 0.24–0.50.
+    val boosted = kotlin.math.sqrt(level.coerceIn(0f, 1f))
+    val gatedLevel = if (active) ((boosted - 0.12f) / 0.88f).coerceIn(0f, 1f) else 0f
     val animatedLevel by animateFloatAsState(
         targetValue = gatedLevel,
         animationSpec = tween(durationMillis = 70),

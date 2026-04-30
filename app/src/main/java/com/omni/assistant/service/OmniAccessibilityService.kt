@@ -630,6 +630,9 @@ class OmniAccessibilityService : AccessibilityService() {
         }
 
         val legend = StringBuilder()
+        if (interactive.isEmpty()) {
+            legend.appendLine("(No interactive elements detected — screen may be loading. Try wait or press_back.)")
+        }
         interactive.forEachIndexed { index, el ->
             val b = el.bounds ?: return@forEachIndexed
             val markNum = index + 1

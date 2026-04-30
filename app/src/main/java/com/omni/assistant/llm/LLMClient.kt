@@ -24,8 +24,8 @@ class LLMClient(private val app: OmniApplication) {
     private var cachedInventoryPrompt: String? = null
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(150, TimeUnit.SECONDS)  // Must exceed backend's 120s Claude timeout
+        .writeTimeout(60, TimeUnit.SECONDS)  // Screenshots can be large
         .build()
 
     suspend fun getNextAction(
@@ -98,7 +98,7 @@ class LLMClient(private val app: OmniApplication) {
 
         val messages = mutableListOf<Map<String, Any>>()
         // History messages are plain text (no images in history to save tokens)
-        for (msg in history.takeLast(10)) {
+        for (msg in history.takeLast(16)) {
             messages.add(mapOf("role" to (msg["role"] ?: "user"), "content" to (msg["content"] ?: "")))
         }
         messages.add(mapOf("role" to "user", "content" to userMessage))

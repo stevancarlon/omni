@@ -25,6 +25,15 @@ android {
         .orElse(localBackendUrl)
         .get()
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("../../omni-keystore.jks")
+            storePassword = "changeme123"
+            keyAlias = "omni"
+            keyPassword = "changeme123"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.omni.assistant"
         minSdk = 29
@@ -37,6 +46,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

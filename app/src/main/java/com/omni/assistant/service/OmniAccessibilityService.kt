@@ -3,16 +3,33 @@ package com.omni.assistant.service
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Typeface
+import android.os.Build
 import android.os.Bundle
+import android.util.Base64
 import android.util.Log
+import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.omni.assistant.data.ActionResult
 import com.omni.assistant.data.AgentAction
 import com.omni.assistant.data.Rect
 import com.omni.assistant.data.ScreenElement
 import com.omni.assistant.util.SensitiveAppGuard
 import kotlinx.coroutines.flow.MutableStateFlow
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+
+data class AnnotatedScreen(
+    val screenshotBase64: String,
+    val legend: String,
+)
 
 class OmniAccessibilityService : AccessibilityService() {
 
@@ -100,23 +117,123 @@ class OmniAccessibilityService : AccessibilityService() {
         return sb.toString()
     }
 
-    // ─── Action Execution ───────────────────────────────────────────────────
+    // ─── Action Validation & Execution ────────────────────────────────────
 
-    fun executeAction(action: AgentAction): Boolean {
-        if (suspended.value) return false
+    fun executeAction(action: AgentAction): ActionResult {
+        if (suspended.value) return ActionResult(false, "Blocked: sensitive app in foreground")
+
+        // Pre-validate actions that target specific nodes
+        val validation = validateAction(action)
+        if (validation != null) return validation
+
         return when (action) {
-            is AgentAction.Tap -> executeTap(action)
-            is AgentAction.TypeText -> executeType(action)
-            is AgentAction.Swipe -> executeSwipe(action)
-            is AgentAction.Scroll -> executeScroll(action)
-            is AgentAction.PressBack -> performGlobalAction(GLOBAL_ACTION_BACK)
-            is AgentAction.PressHome -> performGlobalAction(GLOBAL_ACTION_HOME)
-            is AgentAction.PressRecents -> performGlobalAction(GLOBAL_ACTION_RECENTS)
-            is AgentAction.OpenApp -> openApp(action.packageName, action.name)
-            is AgentAction.OpenUrl -> openUrl(action.url)
-            is AgentAction.Wait -> { Thread.sleep(action.ms); true }
-            is AgentAction.Done -> true
+            is AgentAction.Tap -> {
+                val ok = executeTap(action)
+                val target = action.nodeId ?: "(${action.x}, ${action.y})"
+                if (ok) ActionResult(true, "Tapped $target")
+                else ActionResult(false, "Tap failed on $target — element may have moved or is not interactable")
+            }
+            is AgentAction.TypeText -> {
+                val ok = executeType(action)
+                val target = action.nodeId ?: action.x?.let { "(${action.x}, ${action.y})" } ?: "focused field"
+                if (ok) ActionResult(true, "Typed \"${action.text.take(50)}\" into $target")
+                else ActionResult(false, "Type failed — no editable field at $target. Try tapping the input field first, then type.")
+            }
+            is AgentAction.Swipe -> {
+                val ok = executeSwipe(action)
+                if (ok) ActionResult(true, "Swiped ${action.direction}")
+                else ActionResult(false, "Swipe ${action.direction} failed")
+            }
+            is AgentAction.Scroll -> {
+                val ok = executeScroll(action)
+                if (ok) ActionResult(true, "Scrolled ${action.direction}")
+                else ActionResult(false, "Scroll failed — ${action.nodeId?.let { "node '$it' not scrollable" } ?: "no scrollable element found"}")
+            }
+            is AgentAction.PressBack -> {
+                val ok = performGlobalAction(GLOBAL_ACTION_BACK)
+                ActionResult(ok, if (ok) "Pressed back" else "Press back failed")
+            }
+            is AgentAction.PressHome -> {
+                val ok = performGlobalAction(GLOBAL_ACTION_HOME)
+                ActionResult(ok, if (ok) "Pressed home" else "Press home failed")
+            }
+            is AgentAction.PressRecents -> {
+                val ok = performGlobalAction(GLOBAL_ACTION_RECENTS)
+                ActionResult(ok, if (ok) "Opened recents" else "Open recents failed")
+            }
+            is AgentAction.OpenApp -> {
+                val ok = openApp(action.packageName, action.name)
+                val label = action.name ?: action.packageName
+                if (ok) ActionResult(true, "Opened app: $label")
+                else ActionResult(false, "Failed to open '$label' — app not found or not installed")
+            }
+            is AgentAction.OpenUrl -> {
+                val ok = openUrl(action.url)
+                if (ok) ActionResult(true, "Opened URL: ${action.url.take(60)}")
+                else ActionResult(false, "Failed to open URL: ${action.url.take(60)}")
+            }
+            is AgentAction.Wait -> {
+                Thread.sleep(action.ms)
+                ActionResult(true, "Waited ${action.ms}ms")
+            }
+            is AgentAction.Done -> ActionResult(true, "Done")
         }
+    }
+
+    private fun validateAction(action: AgentAction): ActionResult? {
+        val root = rootInActiveWindow ?: return null
+        try {
+            when (action) {
+                is AgentAction.Tap -> {
+                    if (action.nodeId != null) {
+                        val node = findNodeById(root, action.nodeId)
+                        if (node == null) {
+                            // Check if it's a synthetic bounds ID we can still tap
+                            if (parseBoundsId(action.nodeId) == null) {
+                                return ActionResult(false, "Node '${action.nodeId}' not found on screen. Check the current screen state for valid node IDs.")
+                            }
+                        } else {
+                            if (!node.isEnabled) {
+                                node.recycle()
+                                return ActionResult(false, "Node '${action.nodeId}' exists but is disabled.")
+                            }
+                            node.recycle()
+                        }
+                    }
+                }
+                is AgentAction.TypeText -> {
+                    if (action.nodeId != null) {
+                        val node = findNodeById(root, action.nodeId)
+                        if (node == null) {
+                            return ActionResult(false, "Node '${action.nodeId}' not found. Cannot type into non-existent field.")
+                        }
+                        if (!node.isEditable) {
+                            val label = node.text?.toString()?.take(30) ?: node.className?.toString() ?: ""
+                            node.recycle()
+                            return ActionResult(false, "Node '${action.nodeId}' ($label) is not editable. Look for an EditText or input field.")
+                        }
+                        node.recycle()
+                    }
+                }
+                is AgentAction.Scroll -> {
+                    if (action.nodeId != null) {
+                        val node = findNodeById(root, action.nodeId)
+                        if (node == null) {
+                            return ActionResult(false, "Scroll target '${action.nodeId}' not found on screen.")
+                        }
+                        if (!node.isScrollable) {
+                            node.recycle()
+                            return ActionResult(false, "Node '${action.nodeId}' is not scrollable. Use swipe instead or find a scrollable container.")
+                        }
+                        node.recycle()
+                    }
+                }
+                else -> {}
+            }
+        } finally {
+            root.recycle()
+        }
+        return null // validation passed
     }
 
     private fun executeTap(action: AgentAction.Tap): Boolean {
@@ -225,7 +342,12 @@ class OmniAccessibilityService : AccessibilityService() {
                 }
             }
         }
-        // Use currently focused node
+        // If x,y coordinates provided, tap there first to focus the field
+        if (action.x != null && action.y != null) {
+            performTapGesture(action.x.toFloat(), action.y.toFloat())
+            Thread.sleep(300)
+        }
+        // Type into currently focused node
         val root = rootInActiveWindow ?: return false
         try {
             val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
@@ -369,6 +491,175 @@ class OmniAccessibilityService : AccessibilityService() {
             )
         }
         return 1.0 - dp[a.length][b.length].toDouble() / maxOf(a.length, b.length)
+    }
+
+    // ─── Screenshot Capture ───────────────────────────────────────────────
+
+    fun captureScreenBase64(): String? {
+        if (suspended.value) return null
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+
+        var result: String? = null
+        val latch = CountDownLatch(1)
+
+        takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor,
+            object : TakeScreenshotCallback {
+                override fun onSuccess(screenshot: ScreenshotResult) {
+                    try {
+                        val bitmap = Bitmap.wrapHardwareBuffer(
+                            screenshot.hardwareBuffer, screenshot.colorSpace
+                        ) ?: run {
+                            screenshot.hardwareBuffer.close()
+                            latch.countDown()
+                            return
+                        }
+                        // Scale down to reduce payload size — 720px wide is enough for the LLM
+                        val scale = 720f / bitmap.width.coerceAtLeast(1)
+                        val scaled = if (scale < 1f) {
+                            Bitmap.createScaledBitmap(
+                                bitmap,
+                                (bitmap.width * scale).toInt(),
+                                (bitmap.height * scale).toInt(),
+                                true
+                            )
+                        } else bitmap
+
+                        val stream = ByteArrayOutputStream()
+                        // Copy to software bitmap if needed (hardware bitmaps can't compress directly)
+                        val swBitmap = scaled.copy(Bitmap.Config.ARGB_8888, false)
+                        swBitmap.compress(Bitmap.CompressFormat.JPEG, 60, stream)
+                        result = Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
+
+                        if (swBitmap != scaled) swBitmap.recycle()
+                        if (scaled != bitmap) scaled.recycle()
+                        bitmap.recycle()
+                        screenshot.hardwareBuffer.close()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Screenshot encode failed: ${e.message}")
+                    }
+                    latch.countDown()
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    Log.w(TAG, "Screenshot failed: errorCode=$errorCode")
+                    latch.countDown()
+                }
+            }
+        )
+
+        latch.await(3, TimeUnit.SECONDS)
+        return result
+    }
+
+    // ─── Annotated Screenshot (Set-of-Marks) ──────────────────────────────
+
+    fun captureAnnotatedScreen(): AnnotatedScreen? {
+        if (suspended.value) return null
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+
+        // Get interactive elements
+        val elements = getScreenElements()
+        val interactive = elements.filter { el ->
+            val hasContent = !el.text.isNullOrBlank() || !el.contentDescription.isNullOrBlank()
+            val isInteractive = el.isClickable || el.isEditable || el.isScrollable
+            (hasContent || isInteractive) && el.bounds != null
+        }
+
+        // Capture screenshot
+        var rawBitmap: Bitmap? = null
+        val latch = CountDownLatch(1)
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor,
+                object : TakeScreenshotCallback {
+                    override fun onSuccess(screenshot: ScreenshotResult) {
+                        try {
+                            rawBitmap = Bitmap.wrapHardwareBuffer(
+                                screenshot.hardwareBuffer, screenshot.colorSpace
+                            )
+                            screenshot.hardwareBuffer.close()
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Screenshot decode failed: ${e.message}")
+                        }
+                        latch.countDown()
+                    }
+                    override fun onFailure(errorCode: Int) {
+                        Log.w(TAG, "Screenshot failed: $errorCode")
+                        latch.countDown()
+                    }
+                }
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "takeScreenshot exception: ${e.message}")
+            return null
+        }
+
+        latch.await(3, TimeUnit.SECONDS)
+        val captured = rawBitmap ?: return null
+
+        // Convert to mutable software bitmap
+        val sw = captured.copy(Bitmap.Config.ARGB_8888, true)
+        captured.recycle()
+
+        // Scale down to 720px wide
+        val scale = 720f / sw.width.coerceAtLeast(1)
+        val scaled = if (scale < 1f) {
+            val s = Bitmap.createScaledBitmap(sw, (sw.width * scale).toInt(), (sw.height * scale).toInt(), true)
+            sw.recycle()
+            s
+        } else sw
+
+        // Draw numbered marks
+        val canvas = Canvas(scaled)
+        val bgPaint = Paint().apply {
+            color = Color.rgb(220, 50, 50)
+            style = Paint.Style.FILL
+            isAntiAlias = true
+        }
+        val outlinePaint = Paint().apply {
+            color = Color.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = 2f
+            isAntiAlias = true
+        }
+        val textPaint = Paint().apply {
+            color = Color.WHITE
+            textSize = 16f
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.DEFAULT_BOLD
+            isAntiAlias = true
+        }
+
+        val legend = StringBuilder()
+        interactive.forEachIndexed { index, el ->
+            val b = el.bounds ?: return@forEachIndexed
+            val markNum = index + 1
+            val cx = b.centerX * scale
+            val cy = b.centerY * scale
+
+            // Draw mark on screenshot
+            val radius = if (markNum < 10) 12f else 16f
+            canvas.drawCircle(cx, cy, radius, bgPaint)
+            canvas.drawCircle(cx, cy, radius, outlinePaint)
+            canvas.drawText("$markNum", cx, cy + 5.5f, textPaint)
+
+            // Build legend entry with ORIGINAL coordinates
+            val label = (el.text ?: el.contentDescription ?: "").take(40)
+            val attrs = buildString {
+                if (el.isClickable) append("clickable")
+                if (el.isEditable) { if (isNotEmpty()) append(","); append("editable") }
+                if (el.isScrollable) { if (isNotEmpty()) append(","); append("scrollable") }
+                if (!el.isEnabled) { if (isNotEmpty()) append(","); append("disabled") }
+            }
+            legend.appendLine("[$markNum] \"$label\" ($attrs) at x=${b.centerX}, y=${b.centerY}")
+        }
+
+        // Encode to base64 JPEG
+        val stream = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.JPEG, 65, stream)
+        val base64 = Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
+        scaled.recycle()
+
+        return AnnotatedScreen(base64, legend.toString())
     }
 
     companion object {

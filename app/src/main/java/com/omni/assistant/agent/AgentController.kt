@@ -1,6 +1,7 @@
 package com.omni.assistant.agent
 
 import android.content.Intent
+import android.util.Log
 import android.speech.tts.TextToSpeech
 import com.omni.assistant.OmniApplication
 import com.omni.assistant.data.AgentAction
@@ -91,13 +92,12 @@ class AgentController private constructor(private val app: OmniApplication) {
     }
 
     private fun showOverlay() {
-        // Overlay must appear for every agent run so the user can see state
-        // and stop the task after Omni navigates away to another app.
-        try {
-            app.startForegroundService(Intent(app, OmniOverlayService::class.java).apply {
-                action = OmniOverlayService.ACTION_SHOW
-            })
-        } catch (_: Exception) {}
+        // TODO: Temporarily disabled for testing
+        // try {
+        //     app.startForegroundService(Intent(app, OmniOverlayService::class.java).apply {
+        //         action = OmniOverlayService.ACTION_SHOW
+        //     })
+        // } catch (_: Exception) {}
     }
 
     fun reset() {
@@ -134,9 +134,21 @@ class AgentController private constructor(private val app: OmniApplication) {
         val history = mutableListOf<Map<String, String>>()
         var consecutiveUnchanged = 0
         var lastScreenHash = ""
+        // Track recent actions for deduplication
+        val recentActions = mutableListOf<String>()
+        // Track executed actions for MobileRAG memory
+        val executedActions = mutableListOf<Map<String, Any?>>()
 
         _status.value = AgentStatus.Processing(goal)
         addLog("Starting task: $goal")
+
+        // Query MobileRAG for similar past runs
+        val pastGuidance = try {
+            llmClient.searchMemories(goal)
+        } catch (e: Exception) {
+            Log.w("AgentController", "Memory search failed: ${e.message}")
+            null
+        }
 
         for (step in 1..maxSteps) {
             if (OmniAccessibilityService.suspended.value) {
@@ -146,17 +158,54 @@ class AgentController private constructor(private val app: OmniApplication) {
                 addLog("Resumed")
             }
 
-            val screen = withContext(Dispatchers.Main) { service.getCompactScreenDescription() }
-            val screenHash = screen.hashCode().toString()
+            // ── Auto-recovery: force actions when stuck ──
+            if (consecutiveUnchanged >= 5) {
+                addLog("Auto-recovery: pressing HOME after $consecutiveUnchanged stuck steps")
+                withContext(Dispatchers.Main) { service.executeAction(AgentAction.PressHome) }
+                history.add(mapOf("role" to "user", "content" to "System auto-recovery: pressed HOME because screen was unchanged for $consecutiveUnchanged steps."))
+                recentActions.add("press_home")
+                consecutiveUnchanged = 0
+                delay(1000)
+                continue
+            }
+            if (consecutiveUnchanged >= 3) {
+                addLog("Auto-recovery: pressing BACK after $consecutiveUnchanged stuck steps")
+                withContext(Dispatchers.Main) { service.executeAction(AgentAction.PressBack) }
+                history.add(mapOf("role" to "user", "content" to "System auto-recovery: pressed BACK because screen was unchanged for $consecutiveUnchanged steps."))
+                recentActions.add("press_back")
+                consecutiveUnchanged = 0
+                delay(500)
+                continue
+            }
 
+            // Capture annotated screenshot (Set-of-Marks) + legend
+            val annotated = try {
+                withContext(Dispatchers.Main) { service.captureAnnotatedScreen() }
+            } catch (e: Exception) {
+                Log.w("AgentController", "Annotated screen failed: ${e.message}")
+                null
+            }
+            // Fallback to text-only if screenshot fails
+            val screenLegend = annotated?.legend
+                ?: withContext(Dispatchers.Main) { service.getCompactScreenDescription() }
+
+            val screenHash = screenLegend.hashCode().toString()
             consecutiveUnchanged = trackScreenChanges(screenHash, lastScreenHash, consecutiveUnchanged)
+
+            // Only send screenshot when screen changed or on first step (saves ~4K tokens/step)
+            val screenshot = if (screenHash != lastScreenHash || step == 1) annotated?.screenshotBase64 else null
             lastScreenHash = screenHash
 
+            val fgApp = OmniAccessibilityService.foregroundPackage.value
+
             _status.value = AgentStatus.Executing(goal, step, maxSteps, "Thinking...")
-            addLog("Step $step: Reading screen (${screen.lines().size} elements)")
+            addLog("Step $step: ${screenLegend.lines().size} marks in $fgApp${if (screenshot != null) " + screenshot" else ""}")
+
+            // Build context-aware warnings + self-reflection check
+            val warnings = buildStepWarnings(consecutiveUnchanged, step, maxSteps, recentActions)
 
             val response = try {
-                llmClient.getNextAction(goal, screen, history, voiceCandidates)
+                llmClient.getNextAction(goal, screenLegend, history, voiceCandidates, warnings, screenshot, step == 1, fgApp, pastGuidance)
             } catch (e: Exception) {
                 addLog("LLM error: ${e.message}")
                 fail("LLM error: ${e.message}")
@@ -166,6 +215,7 @@ class AgentController private constructor(private val app: OmniApplication) {
             addLog("Think: ${response.think}")
             addLog("Action: ${response.actionType}")
             _currentThink.value = response.think.ifBlank { response.actionType }
+            // Store compressed history (think + action type only, not raw JSON)
             history.add(mapOf("role" to "assistant", "content" to response.rawJson))
             _status.value = AgentStatus.Executing(goal, step, maxSteps, response.actionType)
 
@@ -174,20 +224,112 @@ class AgentController private constructor(private val app: OmniApplication) {
                 complete(done.success, done.reason)
                 addLog("Done: ${done.reason}")
                 speak(done.reason)
+                // Save successful runs to MobileRAG memory
+                if (done.success && executedActions.isNotEmpty()) {
+                    scope.launch {
+                        try {
+                            llmClient.saveMemory(goal, executedActions, fgApp, step)
+                            addLog("Memory saved: $goal (${executedActions.size} actions)")
+                        } catch (e: Exception) {
+                            Log.w("AgentController", "Memory save failed: ${e.message}")
+                        }
+                    }
+                }
                 return
             }
 
-            val success = withContext(Dispatchers.Main) { service.executeAction(response.action) }
-            val resultText = if (success) "success" else "failed"
-            addLog("Result: $resultText")
+            // ── Action deduplication ──
+            val actionKey = actionSignature(response.action)
+            if (recentActions.count { it == actionKey } >= 2) {
+                addLog("BLOCKED duplicate action: $actionKey — forcing press_back")
+                withContext(Dispatchers.Main) { service.executeAction(AgentAction.PressBack) }
+                history.add(mapOf("role" to "user", "content" to
+                    "System blocked your action '$actionKey' because you already tried it twice. Pressed BACK instead. Try something completely different."))
+                recentActions.add("BLOCKED:$actionKey")
+                delay(500)
+                continue
+            }
+            recentActions.add(actionKey)
+            if (recentActions.size > 5) recentActions.removeAt(0)
 
-            history.add(mapOf("role" to "user", "content" to "Action result: $resultText. Continue working towards the goal."))
+            val result = withContext(Dispatchers.Main) { service.executeAction(response.action) }
+            addLog("Result: ${result.description}")
+            // Track for MobileRAG memory
+            if (result.success) {
+                executedActions.add(mapOf("action" to response.actionType, "params" to response.rawJson.take(200)))
+            }
 
-            delay(400)
+            // Build enriched feedback with action result + screen summary
+            val screenSummary = buildScreenSummary(screenLegend)
+            val feedback = buildString {
+                append("Action result: ${result.description}.")
+                if (!result.success) {
+                    append(" You must try a different approach.")
+                }
+                append("\nScreen after action: $screenSummary")
+            }
+            history.add(mapOf("role" to "user", "content" to feedback))
+
+            // Adaptive delay based on action type
+            val delayMs = when (response.action) {
+                is AgentAction.OpenApp, is AgentAction.OpenUrl -> 1500L
+                is AgentAction.PressBack, is AgentAction.PressHome, is AgentAction.PressRecents -> 300L
+                else -> 500L
+            }
+            delay(delayMs)
         }
 
         complete(false, "Reached maximum steps ($maxSteps)")
         speak("I reached the step limit and couldn't complete the task.")
+    }
+
+    private fun actionSignature(action: AgentAction): String = when (action) {
+        is AgentAction.Tap -> "tap:${action.nodeId ?: "${action.x},${action.y}"}"
+        is AgentAction.TypeText -> "type:${action.nodeId ?: "${action.x},${action.y}"}:${action.text.take(20)}"
+        is AgentAction.Swipe -> "swipe:${action.direction}"
+        is AgentAction.Scroll -> "scroll:${action.direction}:${action.nodeId}"
+        is AgentAction.PressBack -> "press_back"
+        is AgentAction.PressHome -> "press_home"
+        is AgentAction.PressRecents -> "press_recents"
+        is AgentAction.OpenApp -> "open_app:${action.packageName}"
+        is AgentAction.OpenUrl -> "open_url:${action.url.take(30)}"
+        is AgentAction.Wait -> "wait:${action.ms}"
+        is AgentAction.Done -> "done"
+    }
+
+    private fun buildStepWarnings(consecutiveUnchanged: Int, step: Int, maxSteps: Int, recentActions: List<String>): String? {
+        val warnings = mutableListOf<String>()
+        if (consecutiveUnchanged >= 2) {
+            warnings.add("[STUCK $consecutiveUnchanged steps] Screen unchanged. Try a different action.")
+        }
+        if (step >= maxSteps - 3) {
+            warnings.add("[STEP $step/$maxSteps] Finish now: done(success=true) if goal achieved, done(success=false) if not.")
+        }
+        val tried = recentActions.takeLast(3)
+        if (tried.isNotEmpty()) {
+            warnings.add("[Recent actions: ${tried.joinToString(", ")}] — do NOT repeat these.")
+        }
+        // Self-reflection check every 5 steps
+        if (step > 1 && step % 5 == 0) {
+            warnings.add("[REFLECT] Step $step — stop and ask yourself: Am I still working toward the original goal? If the goal is already achieved, use done(success=true). If I'm going in circles, use done(success=false).")
+        }
+        return warnings.joinToString("\n").ifBlank { null }
+    }
+
+    private fun buildScreenSummary(screen: String): String {
+        val lines = screen.lines().filter { it.isNotBlank() }
+        val count = lines.size
+        val keyTexts = lines.take(6).mapNotNull { line ->
+            val match = Regex("text=\"([^\"]+)\"").find(line)
+            match?.groupValues?.get(1)?.take(40)
+        }
+        val summary = buildString {
+            append("$count elements visible")
+            if (keyTexts.isNotEmpty()) {
+                append(". Key text: ${keyTexts.joinToString(", ") { "\"$it\"" }}")
+            }
+        }
+        return summary.take(300)
     }
 
     private fun trackScreenChanges(current: String, previous: String, unchanged: Int): Int {

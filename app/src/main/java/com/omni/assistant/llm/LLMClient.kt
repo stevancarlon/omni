@@ -32,7 +32,12 @@ class LLMClient(private val app: OmniApplication) {
         goal: String,
         screenDescription: String,
         history: List<Map<String, String>>,
-        voiceCandidates: List<String> = listOf(goal)
+        voiceCandidates: List<String> = listOf(goal),
+        warnings: String? = null,
+        screenshotBase64: String? = null,
+        isFirstStep: Boolean = false,
+        foregroundApp: String = "",
+        pastGuidance: String? = null,
     ): LLMResponse {
         val authToken = app.settingsRepository.authToken.first()
         val backendUrl = app.settingsRepository.backendUrl.first()
@@ -40,26 +45,62 @@ class LLMClient(private val app: OmniApplication) {
 
         if (authToken.isBlank()) throw IllegalStateException("Not logged in — please sign in first")
 
-        val inventoryPrompt = cachedInventoryPrompt ?: run {
-            val report = app.appInventory.getOrGenerate()
-            app.appInventory.formatForPrompt(report).also { cachedInventoryPrompt = it }
-        }
-
-        val userMessage = buildString {
+        val userText = buildString {
             appendLine("Goal: $goal")
             if (voiceCandidates.size > 1) {
                 appendLine("Voice recognition alternatives: ${voiceCandidates.joinToString(" | ")}")
                 appendLine("(Pick the interpretation that best matches an installed app or makes the most sense)")
             }
+            if (!warnings.isNullOrBlank()) {
+                appendLine()
+                appendLine(warnings)
+            }
+            // Only include the full app inventory on the first step to save tokens
+            if (isFirstStep) {
+                val inventoryPrompt = cachedInventoryPrompt ?: run {
+                    val report = app.appInventory.getOrGenerate()
+                    app.appInventory.formatForPrompt(report).also { cachedInventoryPrompt = it }
+                }
+                appendLine()
+                appendLine(inventoryPrompt)
+                // Include past successful sequences as guidance
+                if (!pastGuidance.isNullOrBlank()) {
+                    appendLine()
+                    appendLine("═══ PAST SUCCESSFUL EXECUTION (adapt to current screen) ═══")
+                    appendLine(pastGuidance)
+                }
+            }
             appendLine()
-            appendLine(inventoryPrompt)
-            appendLine()
+            if (foregroundApp.isNotBlank()) {
+                appendLine("Currently in: $foregroundApp")
+            }
             appendLine("Current screen state:")
             appendLine(screenDescription.take(4000))
         }
 
-        val messages = mutableListOf<Map<String, String>>()
-        messages.addAll(history.takeLast(10))
+        // Build the user message — with screenshot as multipart content if available
+        val userMessage: Any = if (screenshotBase64 != null) {
+            // Claude multipart content: image + text
+            listOf(
+                mapOf(
+                    "type" to "image",
+                    "source" to mapOf(
+                        "type" to "base64",
+                        "media_type" to "image/jpeg",
+                        "data" to screenshotBase64
+                    )
+                ),
+                mapOf("type" to "text", "text" to userText)
+            )
+        } else {
+            userText
+        }
+
+        val messages = mutableListOf<Map<String, Any>>()
+        // History messages are plain text (no images in history to save tokens)
+        for (msg in history.takeLast(10)) {
+            messages.add(mapOf("role" to (msg["role"] ?: "user"), "content" to (msg["content"] ?: "")))
+        }
         messages.add(mapOf("role" to "user", "content" to userMessage))
 
         return callBackend(backendUrl, authToken, systemPrompt, messages)
@@ -69,7 +110,7 @@ class LLMClient(private val app: OmniApplication) {
         backendUrl: String,
         authToken: String,
         systemPrompt: String,
-        messages: List<Map<String, String>>
+        messages: List<Map<String, Any>>
     ): LLMResponse {
         val body = gson.toJson(mapOf(
             "system" to systemPrompt,
@@ -95,14 +136,16 @@ class LLMClient(private val app: OmniApplication) {
                 }
             })
         }
-        val responseBody = response.body?.string() ?: throw IOException("Empty response")
-        if (!response.isSuccessful) throw IOException("Backend error ${response.code}: $responseBody")
+        return response.use { resp ->
+            val responseBody = resp.body?.string() ?: throw IOException("Empty response")
+            if (!resp.isSuccessful) throw IOException("Backend error ${resp.code}: $responseBody")
 
-        val json = gson.fromJson(responseBody, JsonObject::class.java)
-        val content = json.get("content")?.asString
-            ?: throw IOException("No content in backend response")
+            val json = gson.fromJson(responseBody, JsonObject::class.java)
+            val content = json.get("content")?.asString
+                ?: throw IOException("No content in backend response")
 
-        return parseAgentResponse(content)
+            parseAgentResponse(content)
+        }
     }
 
     private fun parseAgentResponse(rawJson: String): LLMResponse {
@@ -123,7 +166,9 @@ class LLMClient(private val app: OmniApplication) {
             )
             "type" -> AgentAction.TypeText(
                 text = params.get("text")?.asString ?: "",
-                nodeId = params.get("nodeId")?.asString
+                nodeId = params.get("nodeId")?.asString,
+                x = params.get("x")?.asInt,
+                y = params.get("y")?.asInt
             )
             "swipe" -> AgentAction.Swipe(params.get("direction")?.asString ?: "up")
             "scroll" -> AgentAction.Scroll(
@@ -178,5 +223,89 @@ class LLMClient(private val app: OmniApplication) {
         val first = text.indexOf('{')
         val last = text.lastIndexOf('}')
         return if (first >= 0 && last > first) text.substring(first, last + 1) else text
+    }
+
+    // ─── MobileRAG: Action Memory ───────────────────────────────────────────
+
+    suspend fun searchMemories(goal: String): String? {
+        val authToken = app.settingsRepository.authToken.first()
+        val backendUrl = app.settingsRepository.backendUrl.first().trimEnd('/')
+        if (authToken.isBlank() || goal.length < 3) return null
+
+        val request = Request.Builder()
+            .url("$backendUrl/api/agent/memories/search?goal=${java.net.URLEncoder.encode(goal, "UTF-8")}")
+            .get()
+            .header("Authorization", "Bearer $authToken")
+            .build()
+
+        val call = client.newCall(request)
+        val response = kotlinx.coroutines.suspendCancellableCoroutine<Response> { cont ->
+            cont.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: java.io.IOException) {
+                    if (cont.isActive) cont.resumeWith(Result.failure(e))
+                }
+                override fun onResponse(call: Call, response: Response) {
+                    cont.resumeWith(Result.success(response))
+                }
+            })
+        }
+
+        return response.use { resp ->
+            if (!resp.isSuccessful) return@use null
+            val body = resp.body?.string() ?: return@use null
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val memories = json.getAsJsonArray("memories") ?: return@use null
+            if (memories.size() == 0) return@use null
+
+            val best = memories[0].asJsonObject
+            val sim = best.get("similarity")?.asFloat ?: 0f
+            val pastGoal = best.get("goal_text")?.asString ?: ""
+            val actions = best.getAsJsonArray("action_sequence") ?: return@use null
+
+            if (sim < 0.4f) return@use null
+
+            val actionList = (0 until actions.size()).joinToString("\n") { i ->
+                val a = actions[i].asJsonObject
+                "  ${i + 1}. ${a.get("action")?.asString ?: "?"}"
+            }
+
+            "Similar past task (${(sim * 100).toInt()}% match): \"$pastGoal\"\nActions taken:\n$actionList"
+        }
+    }
+
+    suspend fun saveMemory(goal: String, actions: List<Map<String, Any?>>, appContext: String, steps: Int) {
+        val authToken = app.settingsRepository.authToken.first()
+        val backendUrl = app.settingsRepository.backendUrl.first().trimEnd('/')
+        if (authToken.isBlank()) return
+
+        val body = gson.toJson(mapOf(
+            "goal_text" to goal,
+            "action_sequence" to actions,
+            "app_context" to appContext,
+            "steps_taken" to steps,
+            "success" to true
+        ))
+
+        val request = Request.Builder()
+            .url("$backendUrl/api/agent/memories")
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .header("Authorization", "Bearer $authToken")
+            .build()
+
+        // Fire and forget — don't block the agent
+        val call = client.newCall(request)
+        kotlinx.coroutines.suspendCancellableCoroutine<Unit> { cont ->
+            cont.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: java.io.IOException) {
+                    if (cont.isActive) cont.resumeWith(Result.success(Unit))
+                }
+                override fun onResponse(call: Call, response: Response) {
+                    response.close()
+                    cont.resumeWith(Result.success(Unit))
+                }
+            })
+        }
     }
 }

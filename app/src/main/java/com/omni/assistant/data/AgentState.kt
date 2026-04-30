@@ -39,7 +39,7 @@ data class Rect(val left: Int, val top: Int, val right: Int, val bottom: Int) {
 
 sealed class AgentAction {
     data class Tap(val nodeId: String? = null, val x: Int? = null, val y: Int? = null) : AgentAction()
-    data class TypeText(val text: String, val nodeId: String? = null) : AgentAction()
+    data class TypeText(val text: String, val nodeId: String? = null, val x: Int? = null, val y: Int? = null) : AgentAction()
     data class Swipe(val direction: String) : AgentAction()
     data class Scroll(val direction: String, val nodeId: String? = null) : AgentAction()
     object PressBack : AgentAction()
@@ -50,3 +50,8 @@ sealed class AgentAction {
     data class Wait(val ms: Long) : AgentAction()
     data class Done(val success: Boolean, val reason: String) : AgentAction()
 }
+
+data class ActionResult(
+    val success: Boolean,
+    val description: String,
+)

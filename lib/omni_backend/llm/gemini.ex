@@ -25,7 +25,8 @@ defmodule OmniBackend.LLM.Gemini do
   end
 
   defp rate_limited?(reason) when is_binary(reason) do
-    String.contains?(reason, "429") || String.contains?(reason, "RESOURCE_EXHAUSTED")
+    String.contains?(reason, "429") || String.contains?(reason, "503") ||
+      String.contains?(reason, "RESOURCE_EXHAUSTED") || String.contains?(reason, "UNAVAILABLE")
   end
   defp rate_limited?(_), do: false
 

@@ -4,24 +4,51 @@ defmodule OmniBackend.LLM.Gemini do
 
   @default_model "gemini-2.5-pro"
   @fallback_model "gemini-2.5-flash"
+  @cooldown_seconds 120
+
+  require Logger
 
   @impl true
   def completions(model, system, messages) do
-    model = if model in [nil, ""], do: @default_model, else: model
+    model = if model in [nil, ""], do: effective_model(), else: model
 
     case do_request(model, system, messages) do
       {:ok, _} = success ->
+        if model == @default_model, do: clear_cooldown()
         success
 
       {:error, reason} ->
         if model == @default_model do
-          require Logger
-          Logger.warning("Gemini #{@default_model} failed (#{reason}), falling back to #{@fallback_model}")
+          Logger.warning("Gemini #{@default_model} failed (#{reason}), falling back to #{@fallback_model} for #{@cooldown_seconds}s")
+          set_cooldown()
           do_request(@fallback_model, system, messages)
         else
           {:error, reason}
         end
     end
+  end
+
+  defp effective_model do
+    case :persistent_term.get(:gemini_cooldown_until, nil) do
+      nil -> @default_model
+      until ->
+        if System.monotonic_time(:second) < until do
+          @fallback_model
+        else
+          clear_cooldown()
+          @default_model
+        end
+    end
+  end
+
+  defp set_cooldown do
+    :persistent_term.put(:gemini_cooldown_until, System.monotonic_time(:second) + @cooldown_seconds)
+  end
+
+  defp clear_cooldown do
+    :persistent_term.erase(:gemini_cooldown_until)
+  rescue
+    ArgumentError -> :ok
   end
 
   defp do_request(model, system, messages) do

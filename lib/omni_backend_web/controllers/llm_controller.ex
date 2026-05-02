@@ -1,6 +1,8 @@
 defmodule OmniBackendWeb.LLMController do
   use OmniBackendWeb, :controller
 
+  alias OmniBackend.Agent.PromptPolicy
+
   @moduledoc "Proxies LLM requests through backend-held provider keys."
   @doc """
   Non-streaming completion — returns the full LLM response in one JSON body.
@@ -19,7 +21,10 @@ defmodule OmniBackendWeb.LLMController do
   def completions(conn, params) do
     _user = conn.assigns.current_user
     messages = params["messages"] || []
-    system = params["system"] || "You are Omni, an AI assistant that controls Android devices. Respond only with valid JSON."
+    system =
+      (params["system"] || PromptPolicy.default_system())
+      |> PromptPolicy.append()
+
     model = params["model"]
     provider_name = params["provider"] || Application.get_env(:omni_backend, :default_llm_provider, "claude")
 
@@ -56,7 +61,7 @@ defmodule OmniBackendWeb.LLMController do
     provider = params["provider"] || Application.get_env(:omni_backend, :default_llm_provider)
     model = params["model"] || Application.get_env(:omni_backend, :default_llm_model)
     messages = params["messages"] || []
-    system = params["system"]
+    system = PromptPolicy.append(params["system"])
 
     conn =
       conn

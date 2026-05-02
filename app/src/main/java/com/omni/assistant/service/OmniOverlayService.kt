@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omni.assistant.ui.components.OmniOrb
+import com.omni.assistant.ui.theme.OmniIconButton
 import com.omni.assistant.ui.theme.OmniColors
 import com.omni.assistant.ui.theme.OmniGradients
 import com.omni.assistant.ui.theme.OmniShapes
@@ -220,15 +221,18 @@ class OmniOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         }
 
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            y = 80
+            gravity = Gravity.TOP or Gravity.START
+            x = 78
+            y = 5
         }
 
         _visible.value = false
@@ -384,29 +388,29 @@ private fun OverlayPill(
 
     Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 8.dp),
+            .wrapContentWidth()
+            .padding(horizontal = 6.dp, vertical = 0.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(
             modifier = Modifier
                 .dockPillStyle()
                 .clickable { onDismiss() }
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+                .padding(horizontal = 5.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             // Mini orb — renders the live shader-style orb
             OmniOrb(
                 status = status,
-                modifier = Modifier.size(40.dp),
+                modifier = Modifier.size(18.dp),
                 performance = OmniOrbPerformance.Static,
             )
 
             // Status pill
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    .widthIn(max = if (status is AgentStatus.Executing) 58.dp else 92.dp)
                     .clip(OmniShapes.Pill)
                     .background(OmniColors.Surface.copy(alpha = 0.4f))
                     .border(
@@ -414,40 +418,29 @@ private fun OverlayPill(
                         color = Color.White.copy(alpha = 0.08f),
                         shape = OmniShapes.Pill,
                     )
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                    .padding(horizontal = 7.dp, vertical = 3.dp),
             ) {
                 Text(
                     text = statusText,
                     style = TextStyle(
                         brush = OmniGradients.SilverText,
                         fontWeight = FontWeight.Medium,
-                        fontSize = 14.sp,
+                        fontSize = 10.sp,
                     ),
                     maxLines = 1,
                 )
             }
 
             if (showStop) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(OmniShapes.Pill)
-                        .background(OmniColors.Surface.copy(alpha = 0.5f))
-                        .border(
-                            width = 1.dp,
-                            color = Color.White.copy(alpha = 0.08f),
-                            shape = OmniShapes.Pill,
-                        )
-                        .clickable {
-                            onCancel()
-                        },
-                    contentAlignment = Alignment.Center,
+                OmniIconButton(
+                    onClick = onCancel,
+                    size = 22.dp,
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Stop,
                         contentDescription = "Stop",
                         tint = Color.White.copy(alpha = 0.86f),
-                        modifier = Modifier.size(18.dp),
+                        modifier = Modifier.size(13.dp),
                     )
                 }
             }

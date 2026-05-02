@@ -565,10 +565,18 @@ class OmniAccessibilityService : AccessibilityService() {
             (hasContent || isInteractive) && el.bounds != null &&
                 el.bounds!!.let { b -> b.right > b.left && b.bottom > b.top } // skip zero-size
         }
+        // Prioritize likely task-progress controls before capping. Accessibility
+        // traversal order often lists containers before the bottom CTA.
+        val ranked = raw.sortedWith(
+            compareByDescending<ScreenElement> { elementPriority(it) }
+                .thenBy { it.bounds?.top ?: Int.MAX_VALUE }
+                .thenBy { it.bounds?.left ?: Int.MAX_VALUE }
+        )
+
         // Deduplicate: skip marks too close to an existing one (within 30px)
         val interactive = mutableListOf<ScreenElement>()
         val usedCenters = mutableListOf<Pair<Int, Int>>()
-        for (el in raw) {
+        for (el in ranked) {
             val b = el.bounds!!
             val cx = b.centerX; val cy = b.centerY
             val tooClose = usedCenters.any { (ox, oy) ->
@@ -669,6 +677,8 @@ class OmniAccessibilityService : AccessibilityService() {
                 if (el.isEditable) { if (isNotEmpty()) append(","); append("editable") }
                 if (el.isScrollable) { if (isNotEmpty()) append(","); append("scrollable") }
                 if (!el.isEnabled) { if (isNotEmpty()) append(","); append("disabled") }
+                val role = actionRole(el)
+                if (role != null) { if (isNotEmpty()) append(","); append(role) }
             }
             legend.appendLine("[$markNum] \"$label\" ($attrs) at x=${b.centerX}, y=${b.centerY}")
         }
@@ -680,6 +690,73 @@ class OmniAccessibilityService : AccessibilityService() {
         scaled.recycle()
 
         return AnnotatedScreen(base64, legend.toString())
+    }
+
+    private fun elementPriority(element: ScreenElement): Int {
+        val label = elementLabel(element).lowercase()
+        var score = 0
+        if (element.isClickable) score += 20
+        if (element.isEditable) score += 18
+        if (!element.isEnabled) score -= 60
+        if (isPrimaryActionLabel(label)) score += 80
+        if (isSecondaryOptionLabel(label)) score -= 25
+        val bounds = element.bounds
+        if (bounds != null) {
+            val width = bounds.right - bounds.left
+            val height = bounds.bottom - bounds.top
+            if (width >= 120 && height in 32..180) score += 8
+            if (bounds.top > resources.displayMetrics.heightPixels * 0.55f) score += 6
+        }
+        return score
+    }
+
+    private fun actionRole(element: ScreenElement): String? {
+        val label = elementLabel(element).lowercase()
+        return when {
+            isPrimaryActionLabel(label) -> "primary_candidate"
+            isSecondaryOptionLabel(label) -> "secondary_option"
+            else -> null
+        }
+    }
+
+    private fun elementLabel(element: ScreenElement): String {
+        return element.text?.takeIf { it.isNotBlank() }
+            ?: element.contentDescription?.takeIf { it.isNotBlank() }
+            ?: ""
+    }
+
+    private fun isPrimaryActionLabel(label: String): Boolean {
+        if (label.isBlank()) return false
+        val normalized = normalizeActionLabel(label)
+        val primaryWords = listOf(
+            "start", "go", "continue", "next", "done", "send", "confirm", "save",
+            "order", "book", "play", "call", "navigate", "open", "join", "pay",
+            "begin", "submit", "finish", "route", "directions", "ok", "yes",
+            "iniciar", "comecar", "começar", "ir", "continuar", "proximo", "próximo",
+            "concluir", "enviar", "confirmar", "salvar", "pedir", "reservar",
+            "reproduzir", "ligar", "navegar", "abrir", "entrar", "pagar",
+        )
+        return primaryWords.any { normalized == it || normalized.contains(" $it ") || normalized.startsWith("$it ") || normalized.endsWith(" $it") }
+    }
+
+    private fun isSecondaryOptionLabel(label: String): Boolean {
+        if (label.isBlank()) return false
+        val normalized = normalizeActionLabel(label)
+        val secondaryWords = listOf(
+            "more", "options", "filter", "filters", "sort", "details", "share",
+            "settings", "menu", "overflow", "category", "categories", "suggestions",
+            "opcoes", "opções", "filtro", "filtros", "ordenar", "detalhes",
+            "compartilhar", "configuracoes", "configurações", "menu", "categorias",
+            "sugestoes", "sugestões",
+        )
+        return secondaryWords.any { normalized == it || normalized.contains(" $it ") || normalized.startsWith("$it ") || normalized.endsWith(" $it") }
+    }
+
+    private fun normalizeActionLabel(label: String): String {
+        return label.lowercase()
+            .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+            .trim()
+            .let { " $it " }
     }
 
     companion object {

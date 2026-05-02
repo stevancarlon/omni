@@ -18,7 +18,7 @@ android {
     }
     val localBackendUrl = localProperties.getProperty("OMNI_BACKEND_URL")
         ?.takeIf { it.isNotBlank() }
-        ?: "http://192.168.2.111:4000"
+        ?: "https://omni-backend-bq8e.onrender.com"
 
     val defaultBackendUrl = providers.gradleProperty("OMNI_BACKEND_URL")
         .orElse(providers.environmentVariable("OMNI_BACKEND_URL"))
@@ -35,7 +35,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.omni.assistant"
+        applicationId = "com.omni.orb"
         minSdk = 29
         targetSdk = 35
         versionCode = 1

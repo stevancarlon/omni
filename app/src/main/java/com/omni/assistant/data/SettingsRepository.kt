@@ -34,13 +34,6 @@ class SettingsRepository(private val context: Context) {
         val KEY_SUBSCRIPTION_PLAN = stringPreferencesKey("subscription_plan")
 
         val DEFAULT_BACKEND_URL = BuildConfig.DEFAULT_BACKEND_URL
-        private const val LEGACY_DEFAULT_BACKEND_URL = "http://192.168.2.111:4000"
-        private val LEGACY_NGROK_URLS = setOf(
-            "https://9949-186-225-237-108.ngrok-free.app",
-            "https://ceea-186-225-237-15.ngrok-free.app",
-            "https://97aa-2804-77c-910b-c101-f67f-e92c-fb18-e040.ngrok-free.app",
-            "https://7721-186-225-237-17.ngrok-free.app",
-        )
 
         const val DEFAULT_SYSTEM_PROMPT = """You are Omni — a sharp, resourceful AI agent that lives inside an Android phone. You see the screen, you act on it, you get things done. You're the user's hands when they can't (or don't want to) touch the screen themselves.
 
@@ -87,6 +80,15 @@ On your FIRST step, before doing anything, evaluate whether the user's command i
 - If a tap doesn't work, the element might be behind a popup or not truly clickable — look at the screenshot for visual clues.
 - Do NOT narrate problems. Just act differently.
 
+═══ NEXT ACTION PRIORITY ═══
+Act like a human finishing the current flow, not like a menu explorer.
+- If the screen shows a primary action that advances or commits the user's goal, tap it now.
+- Primary progress/commit labels include Start, Go, Continue, Next, Done, Send, Confirm, Save, Order, Book, Play, Call, Navigate, Open, Join, Pay, and localized equivalents.
+- Prefer direct primary actions over secondary controls like More, Options, Filters, Sort, Details, Share, Settings, overflow menus, category chips, suggestions, or informational cards.
+- Do not open modals, option sheets, filters, or alternate choices unless the current screen is missing required information for the user's goal.
+- If the requested target is already selected or visible and there is a clear action to begin/submit/continue, press that action instead of exploring nearby choices.
+- If a modal or sheet is blocking progress and it is not required, dismiss it with Back or a close control and return to the main flow.
+
 ═══ COMPLETION DETECTION — CRITICAL ═══
 Stop AS SOON AS the goal is achieved. Do NOT take extra "verification" steps or unnecessary actions after the task is done.
 - If the user asked to "open YouTube" and YouTube is now on screen → done(success=true, reason="YouTube is open").
@@ -125,11 +127,10 @@ Don't be robotic ("Task completed successfully.") or overly formal. Keep it shor
     val authToken: Flow<String> = context.dataStore.data.map { it[KEY_AUTH_TOKEN] ?: "" }
     val backendUrl: Flow<String> = context.dataStore.data.map {
         val storedBackendUrl = it[KEY_BACKEND_URL]?.trim()
-        when {
-            storedBackendUrl.isNullOrBlank() -> DEFAULT_BACKEND_URL
-            storedBackendUrl == LEGACY_DEFAULT_BACKEND_URL -> DEFAULT_BACKEND_URL
-            storedBackendUrl in LEGACY_NGROK_URLS -> DEFAULT_BACKEND_URL
-            else -> storedBackendUrl
+        if (storedBackendUrl.isNullOrBlank() || storedBackendUrl != DEFAULT_BACKEND_URL) {
+            DEFAULT_BACKEND_URL
+        } else {
+            storedBackendUrl
         }
     }
     val wakeWordEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_WAKE_WORD_ENABLED] ?: true }

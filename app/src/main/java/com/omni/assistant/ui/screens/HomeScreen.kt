@@ -149,6 +149,7 @@ fun HomeScreen(
                     Bucket.Speaking -> SpeakingLayout(status, onNavigateToSettings)
                     Bucket.Done -> DoneLayout(
                         status = status,
+                        agentController = agentController,
                         onSettings = onNavigateToSettings,
                         onMic = { activity?.startListenerService() },
                         onSubmit = { text ->
@@ -808,6 +809,7 @@ private fun SpeakingLayout(status: AgentStatus, onSettings: () -> Unit) {
 @Composable
 private fun DoneLayout(
     status: AgentStatus,
+    agentController: AgentController,
     onSettings: () -> Unit,
     onMic: () -> Unit,
     onSubmit: (String) -> Unit,
@@ -815,14 +817,39 @@ private fun DoneLayout(
     val done = status as? AgentStatus.Done
     val success = done?.success == true
     val tone = if (success) OmniColors.Success else OmniColors.Error
-    ResultLayout(
-        status = status,
-        caption = if (success) "Done! ${done?.reason.orEmpty()}" else "Couldn\u2019t complete: ${done?.reason.orEmpty()}",
-        tone = tone,
-        onSettings = onSettings,
-        onMic = onMic,
-        onSubmit = onSubmit,
-    )
+    val pendingMemory by agentController.pendingMemory.collectAsState()
+
+    Box {
+        ResultLayout(
+            status = status,
+            caption = if (success) "Done! ${done?.reason.orEmpty()}" else "Couldn\u2019t complete: ${done?.reason.orEmpty()}",
+            tone = tone,
+            onSettings = onSettings,
+            onMic = onMic,
+            onSubmit = onSubmit,
+        )
+
+        if (pendingMemory != null) {
+            AlertDialog(
+                onDismissRequest = { agentController.dismissMemory() },
+                containerColor = Color(0xFF1A1E2E),
+                titleContentColor = OmniColors.Ink,
+                textContentColor = OmniColors.InkMute,
+                title = { Text("Did that work?", fontWeight = FontWeight.Medium) },
+                text = { Text("Save this task so Omni can learn from it and be faster next time.", fontSize = 13.sp) },
+                confirmButton = {
+                    TextButton(onClick = { agentController.confirmMemory(true) }) {
+                        Text("Yes, save it", color = OmniColors.BrandBlueGlow)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { agentController.confirmMemory(false) }) {
+                        Text("No", color = OmniColors.InkMute)
+                    }
+                },
+            )
+        }
+    }
 }
 
 @Composable

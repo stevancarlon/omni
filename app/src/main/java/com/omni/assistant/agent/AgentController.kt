@@ -36,6 +36,29 @@ class AgentController private constructor(private val app: OmniApplication) {
     private val _ttsActive = MutableStateFlow(false)
     val ttsActive: StateFlow<Boolean> = _ttsActive.asStateFlow()
 
+    /** Pending memory awaiting user confirmation. */
+    data class PendingMemory(val goal: String, val actions: List<Map<String, Any?>>, val appContext: String, val steps: Int)
+    private val _pendingMemory = MutableStateFlow<PendingMemory?>(null)
+    val pendingMemory: StateFlow<PendingMemory?> = _pendingMemory.asStateFlow()
+
+    fun confirmMemory(success: Boolean) {
+        val pending = _pendingMemory.value ?: return
+        _pendingMemory.value = null
+        if (success) {
+            scope.launch {
+                try {
+                    llmClient.saveMemory(pending.goal, pending.actions, pending.appContext, pending.steps)
+                } catch (e: Exception) {
+                    Log.w("AgentController", "Memory save failed: ${e.message}")
+                }
+            }
+        }
+    }
+
+    fun dismissMemory() {
+        _pendingMemory.value = null
+    }
+
     init {
         tts = TextToSpeech(app) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -92,12 +115,11 @@ class AgentController private constructor(private val app: OmniApplication) {
     }
 
     private fun showOverlay() {
-        // TODO: Temporarily disabled for testing
-        // try {
-        //     app.startForegroundService(Intent(app, OmniOverlayService::class.java).apply {
-        //         action = OmniOverlayService.ACTION_SHOW
-        //     })
-        // } catch (_: Exception) {}
+        try {
+            app.startForegroundService(Intent(app, OmniOverlayService::class.java).apply {
+                action = OmniOverlayService.ACTION_SHOW
+            })
+        } catch (_: Exception) {}
     }
 
     fun reset() {
@@ -230,16 +252,9 @@ class AgentController private constructor(private val app: OmniApplication) {
                 complete(done.success, done.reason)
                 addLog("Done: ${done.reason}")
                 speak(done.reason)
-                // Save successful runs to MobileRAG memory
-                if (done.success && executedActions.isNotEmpty()) {
-                    scope.launch {
-                        try {
-                            llmClient.saveMemory(goal, executedActions, targetApp.ifBlank { fgApp }, step)
-                            addLog("Memory saved: $goal (${executedActions.size} actions)")
-                        } catch (e: Exception) {
-                            Log.w("AgentController", "Memory save failed: ${e.message}")
-                        }
-                    }
+                // Offer user to confirm memory save
+                if (executedActions.isNotEmpty()) {
+                    _pendingMemory.value = PendingMemory(goal, executedActions.toList(), targetApp.ifBlank { fgApp }, step)
                 }
                 return
             }
@@ -265,14 +280,15 @@ class AgentController private constructor(private val app: OmniApplication) {
                 executedActions.add(mapOf("action" to response.actionType, "params" to response.rawJson.take(200)))
             }
 
-            // Build enriched feedback with action result + screen summary
+            // Keep feedback factual: this summary is from the screen used to
+            // choose the action, not a fresh post-action capture.
             val screenSummary = buildScreenSummary(screenLegend)
             val feedback = buildString {
                 append("Action result: ${result.description}.")
                 if (!result.success) {
                     append(" You must try a different approach.")
                 }
-                append("\nScreen after action: $screenSummary")
+                append("\nScreen before action: $screenSummary")
             }
             history.add(mapOf("role" to "user", "content" to feedback))
 

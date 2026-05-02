@@ -36,4 +36,4 @@ COPY --from=build /app/_build/prod/rel/omni_backend ./
 
 ENV PHX_SERVER=true
 
-CMD ["bin/omni_backend", "start"]
+CMD bin/omni_backend eval "OmniBackend.Release.migrate()" && bin/omni_backend start

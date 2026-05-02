@@ -17,6 +17,7 @@ defmodule OmniBackendWeb.Router do
   scope "/api", OmniBackendWeb do
     pipe_through :api
 
+    get "/health", HealthController, :check
     post "/auth/register", AuthController, :register
     post "/auth/login", AuthController, :login
     post "/auth/google", AuthController, :google

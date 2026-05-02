@@ -197,14 +197,15 @@ class DeepgramClient(
             SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
         )
 
-        // MIC first — on Samsung A54, MIC with DSP gain gives ~3x louder signal
-        // than UNPROCESSED (which bypasses AGC). Avoid VOICE_RECOGNITION — returns
-        // silence on some Samsungs.
+        // MIC first: on Samsung A54, MIC with DSP gain gives a louder signal
+        // than UNPROCESSED. Avoid VOICE_RECOGNITION here: it can initialize
+        // but degrade or silence wake-word audio on some Samsung devices.
         val sources = intArrayOf(
             MediaRecorder.AudioSource.MIC,
-            MediaRecorder.AudioSource.UNPROCESSED
+            MediaRecorder.AudioSource.UNPROCESSED,
         )
         var selected: AudioRecord? = null
+        var selectedSourceIndex = -1
         for (src in sources) {
             val rec = try {
                 AudioRecord(src, SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
@@ -213,6 +214,7 @@ class DeepgramClient(
             if (rec.state == AudioRecord.STATE_INITIALIZED) {
                 Log.d(TAG, "Using audio source=$src")
                 selected = rec
+                selectedSourceIndex = sources.indexOf(src)
                 break
             }
             rec.release()
@@ -232,6 +234,7 @@ class DeepgramClient(
             var bytesSent = 0L
             var lastLogMs = 0L
             var lastLevelMs = 0L
+            var zeroPeakMs = 0L
             // DC offset tracker (running mean) and pre-emphasis state across reads —
             // pre-emphasis y[n] = x[n] - 0.97*x[n-1] boosts high frequencies so
             // consonants survive the gain/soft-clip stage.
@@ -277,6 +280,22 @@ class DeepgramClient(
                         if (a > peak) peak = a
                         i += 2
                     }
+                    val frameMs = (read / 2) * 1000L / SAMPLE_RATE
+                    if (peak <= DEAD_STREAM_PEAK_THRESHOLD) {
+                        zeroPeakMs += frameMs
+                    } else {
+                        zeroPeakMs = 0L
+                    }
+                    if (zeroPeakMs >= SILENT_SOURCE_FALLBACK_MS && selectedSourceIndex < sources.lastIndex) {
+                        val nextIndex = reopenAudioSource(sources, selectedSourceIndex + 1, bufferSize)
+                        if (nextIndex != selectedSourceIndex) {
+                            selectedSourceIndex = nextIndex
+                            zeroPeakMs = 0L
+                            dcOffset = 0.0
+                            prevSample = 0
+                            continue
+                        }
+                    }
                     val payload = buffer.copyOf(read).toByteString()
                     // Buffer raw PCM for Whisper transcription in command mode
                     if (mode == ListenMode.COMMAND) {
@@ -315,6 +334,43 @@ class DeepgramClient(
             }
             Log.d(TAG, "Audio capture stopped, total=${bytesSent / 1024}KB")
         }
+    }
+
+    private fun reopenAudioSource(sources: IntArray, startIndex: Int, bufferSize: Int): Int {
+        if (!isRecording) return startIndex - 1
+
+        val previous = audioRecord
+        try { previous?.stop() } catch (_: Exception) {}
+        previous?.release()
+        audioRecord = null
+
+        for (index in startIndex until sources.size) {
+            val source = sources[index]
+            val rec = try {
+                AudioRecord(
+                    source,
+                    SAMPLE_RATE,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    bufferSize * 2,
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Audio source=$source failed: ${e.message}")
+                continue
+            }
+            if (rec.state == AudioRecord.STATE_INITIALIZED) {
+                audioRecord = rec
+                rec.startRecording()
+                Log.w(TAG, "Wake audio source was silent; switched to source=$source")
+                return index
+            }
+            rec.release()
+        }
+
+        Log.e(TAG, "All fallback audio sources failed after silent wake stream")
+        isRecording = false
+        onError("Microphone stream is silent")
+        return sources.lastIndex
     }
 
     // ─── Message Handling ────────────────────────────────────────────────────
@@ -395,9 +451,10 @@ class DeepgramClient(
             onStopWordDetected()
             return
         }
-        if (!wakeDetected && isWakeWordMatch(transcript)) {
+        val match = wakeWordMatch(transcript)
+        if (!wakeDetected && match != null) {
             wakeDetected = true
-            Log.d(TAG, "Wake word detected: \"$transcript\"")
+            Log.d(TAG, "Wake word detected ($match): \"$transcript\"")
             onWakeWordDetected()
         }
     }
@@ -413,15 +470,96 @@ class DeepgramClient(
     }
 
     private fun isWakeWordMatch(text: String): Boolean {
+        return wakeWordMatch(text) != null
+    }
+
+    private fun wakeWordMatch(text: String): String? {
         val normalized = normalizePhrase(text)
-        if (normalizedWakeWords.any { normalized.contains(it) }) return true
+        if (normalized.isBlank()) return null
+
+        normalizedWakeWords.firstOrNull { normalized.contains(it) }?.let {
+            return "phrase:$it"
+        }
 
         val words = normalized.split(" ").filter { it.isNotBlank() }
-        val heyIndex = words.indexOf("hey")
-        if (heyIndex == -1 || heyIndex == words.lastIndex) return false
+        if (words.isEmpty()) return null
 
-        val candidate = words[heyIndex + 1]
-        return candidate in WAKE_WORD_ALIASES || editDistance(candidate, "omni") <= 2
+        val wakeTokens = normalizePhrase(wakeWord)
+            .split(" ")
+            .filter { it.isNotBlank() }
+            .ifEmpty { listOf("hey", "omni") }
+
+        val phraseScore = orderedPhraseScore(words, wakeTokens)
+        if (phraseScore >= WAKE_PHRASE_SCORE_THRESHOLD) {
+            return "phraseScore:${"%.2f".format(phraseScore)}"
+        }
+
+        val anchorToken = wakeTokens.lastOrNull() ?: "omni"
+        val bestAnchor = words
+            .map { it to tokenSimilarity(it, anchorToken) }
+            .maxByOrNull { it.second }
+        if (bestAnchor != null && bestAnchor.second >= WAKE_ANCHOR_SCORE_THRESHOLD) {
+            return "anchor:${bestAnchor.first}:${"%.2f".format(bestAnchor.second)}"
+        }
+
+        if (words.size >= wakeTokens.size) {
+            var bestWindow = 0.0
+            for (i in 0..(words.size - wakeTokens.size)) {
+                val score = wakeTokens.indices
+                    .map { tokenSimilarity(words[i + it], wakeTokens[it]) }
+                    .average()
+                if (score > bestWindow) bestWindow = score
+            }
+            if (bestWindow >= WAKE_WINDOW_SCORE_THRESHOLD) {
+                return "window:${"%.2f".format(bestWindow)}"
+            }
+        }
+
+        return null
+    }
+
+    private fun orderedPhraseScore(words: List<String>, wakeTokens: List<String>): Double {
+        if (words.isEmpty() || wakeTokens.isEmpty()) return 0.0
+        var searchFrom = 0
+        var score = 0.0
+        var matched = 0
+        for (target in wakeTokens) {
+            var bestIndex = -1
+            var bestScore = 0.0
+            for (i in searchFrom until words.size) {
+                val candidateScore = tokenSimilarity(words[i], target)
+                if (candidateScore > bestScore) {
+                    bestScore = candidateScore
+                    bestIndex = i
+                }
+            }
+            if (bestIndex == -1) continue
+            score += bestScore
+            matched += 1
+            searchFrom = bestIndex + 1
+        }
+        val coverage = matched.toDouble() / wakeTokens.size
+        return (score / wakeTokens.size) * coverage
+    }
+
+    private fun tokenSimilarity(candidate: String, target: String): Double {
+        if (candidate.isBlank() || target.isBlank()) return 0.0
+        if (candidate == target) return 1.0
+
+        val maxLength = maxOf(candidate.length, target.length).toDouble()
+        val editScore = 1.0 - (editDistance(candidate, target) / maxLength)
+        val prefixScore = commonPrefixLength(candidate, target) / maxLength
+        val substringScore = if (candidate.contains(target) || target.contains(candidate)) 0.86 else 0.0
+
+        return maxOf(editScore, prefixScore, substringScore).coerceIn(0.0, 1.0)
+    }
+
+    private fun commonPrefixLength(a: String, b: String): Int {
+        val max = minOf(a.length, b.length)
+        for (i in 0 until max) {
+            if (a[i] != b[i]) return i
+        }
+        return max
     }
 
     private fun normalizePhrase(text: String): String {
@@ -545,7 +683,12 @@ class DeepgramClient(
         private const val DC_ALPHA = 0.001  // running-mean rate for DC offset tracker
         private const val PRE_EMPHASIS = 0.97  // y[n] = x[n] - 0.97*x[n-1]
         private const val PENDING_MAX_BYTES = 96000  // ~3s of buffered audio while WS handshakes
+        private const val DEAD_STREAM_PEAK_THRESHOLD = 8
+        private const val SILENT_SOURCE_FALLBACK_MS = 4_000L
         private val WAKE_WORD_ALIASES = setOf("omni", "umini", "umni", "mini", "omie", "homie")
+        private const val WAKE_PHRASE_SCORE_THRESHOLD = 0.55
+        private const val WAKE_ANCHOR_SCORE_THRESHOLD = 0.50
+        private const val WAKE_WINDOW_SCORE_THRESHOLD = 0.58
         private val STOP_VERBS = setOf("stop", "para", "pare")
         private val STOP_PHRASES = setOf("stop omni", "stop homie", "para omni", "pare omni")
     }

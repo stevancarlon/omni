@@ -184,20 +184,29 @@ class OmniListenerService : Service() {
                     }
                 }
             },
+            onNoSpeechTimeout = {
+                if (isListeningForCommand) {
+                    Log.d(TAG, "Command recorder timed out before speech")
+                    handleNoCommand()
+                }
+            },
             onSilenceTimeout = { audio ->
                 if (isListeningForCommand) {
                     isListeningForCommand = false
                     updateNotification("Transcribing...")
                     agentController.onTranscriptionUpdated("Transcribing...")
                     scope.launch {
-                        val result = WhisperClient(application as OmniApplication)
-                            .transcribe(audio, cachedSpeechLanguage)
+                        Log.d(TAG, "Sending ${audio.size / 1024}KB command audio to Whisper")
+                        val result = withTimeoutOrNull(COMMAND_TRANSCRIBE_TIMEOUT_MS) {
+                            WhisperClient(application as OmniApplication)
+                                .transcribe(audio, cachedSpeechLanguage)
+                        }
                         if (result != null && result.text.isNotBlank()) {
                             Log.d(TAG, "Whisper: \"${result.text}\" (lang=${result.language})")
                             val text = result.text.lowercase()
                             handleCommandResult(text, listOf(text))
                         } else {
-                            Log.d(TAG, "Whisper returned empty, no command")
+                            Log.d(TAG, "Whisper returned empty or timed out, no command")
                             handleNoCommand()
                         }
                     }
@@ -673,6 +682,7 @@ class OmniListenerService : Service() {
         private const val AGENT_RETURN_TO_WAKE_TIMEOUT_MS = 10 * 60 * 1000L
         private const val RETURN_TO_WAKE_COOLDOWN_MS = 1500L
         private const val TTS_FINISH_TIMEOUT_MS = 15_000L
+        private const val COMMAND_TRANSCRIBE_TIMEOUT_MS = 35_000L
         private const val DEEPGRAM_WAKE_MODEL = "flux-general-en"
         private const val DEEPGRAM_COMMAND_MODEL = "nova-3"
         const val NOTIF_ID = 1001

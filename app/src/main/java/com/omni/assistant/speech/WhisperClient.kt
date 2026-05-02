@@ -25,7 +25,8 @@ class WhisperClient(private val app: OmniApplication) {
     private val gson = Gson()
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
+        .callTimeout(30, TimeUnit.SECONDS)
         .build()
 
     data class TranscriptionResult(val text: String, val language: String)

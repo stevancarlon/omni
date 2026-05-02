@@ -4,6 +4,8 @@ defmodule OmniBackend.LLM.OpenAI do
 
   @default_model "gpt-5.5"
 
+  def default_model, do: @default_model
+
   @impl true
   def completions(model, system, messages) do
     api_key = Application.get_env(:omni_backend, :openai_api_key)
@@ -48,12 +50,23 @@ defmodule OmniBackend.LLM.OpenAI do
 
   @doc "Convert Claude image format to OpenAI format in message content blocks."
   def convert_message(%{"content" => content} = msg) when is_list(content) do
-    converted = Enum.map(content, fn
-      %{"type" => "image", "source" => %{"type" => "base64", "media_type" => mt, "data" => data}} ->
-        %{"type" => "image_url", "image_url" => %{"url" => "data:#{mt};base64,#{data}", "detail" => "low"}}
-      block -> block
-    end)
+    converted =
+      Enum.map(content, fn
+        %{
+          "type" => "image",
+          "source" => %{"type" => "base64", "media_type" => mt, "data" => data}
+        } ->
+          %{
+            "type" => "image_url",
+            "image_url" => %{"url" => "data:#{mt};base64,#{data}", "detail" => "low"}
+          }
+
+        block ->
+          block
+      end)
+
     Map.put(msg, "content", converted)
   end
+
   def convert_message(msg), do: msg
 end

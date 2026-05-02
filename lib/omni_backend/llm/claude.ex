@@ -7,6 +7,8 @@ defmodule OmniBackend.LLM.Claude do
   # Higher = deeper analysis on complex screens, but slower.
   @thinking_budget 10_000
 
+  def default_model, do: @default_model
+
   @impl true
   def completions(model, system, messages) do
     api_key = Application.get_env(:omni_backend, :anthropic_api_key)

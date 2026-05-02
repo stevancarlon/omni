@@ -8,6 +8,8 @@ defmodule OmniBackend.LLM.Gemini do
 
   require Logger
 
+  def default_model, do: @default_model
+
   @impl true
   def completions(model, system, messages) do
     model = if model in [nil, ""], do: effective_model(), else: model
@@ -19,7 +21,10 @@ defmodule OmniBackend.LLM.Gemini do
 
       {:error, reason} ->
         if model == @default_model do
-          Logger.warning("Gemini #{@default_model} failed (#{reason}), falling back to #{@fallback_model} for #{@cooldown_seconds}s")
+          Logger.warning(
+            "Gemini #{@default_model} failed (#{reason}), falling back to #{@fallback_model} for #{@cooldown_seconds}s"
+          )
+
           set_cooldown()
           do_request(@fallback_model, system, messages)
         else
@@ -30,7 +35,9 @@ defmodule OmniBackend.LLM.Gemini do
 
   defp effective_model do
     case :persistent_term.get(:gemini_cooldown_until, nil) do
-      nil -> @default_model
+      nil ->
+        @default_model
+
       until ->
         if System.monotonic_time(:second) < until do
           @fallback_model
@@ -42,7 +49,10 @@ defmodule OmniBackend.LLM.Gemini do
   end
 
   defp set_cooldown do
-    :persistent_term.put(:gemini_cooldown_until, System.monotonic_time(:second) + @cooldown_seconds)
+    :persistent_term.put(
+      :gemini_cooldown_until,
+      System.monotonic_time(:second) + @cooldown_seconds
+    )
   end
 
   defp clear_cooldown do
@@ -55,7 +65,8 @@ defmodule OmniBackend.LLM.Gemini do
     api_key = Application.get_env(:omni_backend, :gemini_api_key)
     gemini_contents = convert_messages(messages)
 
-    url = "https://generativelanguage.googleapis.com/v1beta/models/#{model}:generateContent?key=#{api_key}"
+    url =
+      "https://generativelanguage.googleapis.com/v1beta/models/#{model}:generateContent?key=#{api_key}"
 
     body = %{
       system_instruction: %{
@@ -86,7 +97,9 @@ defmodule OmniBackend.LLM.Gemini do
                 %{"text" => text} -> text
                 _ -> nil
               end)
-            _ -> ""
+
+            _ ->
+              ""
           end
 
         {:ok, content}
@@ -106,24 +119,31 @@ defmodule OmniBackend.LLM.Gemini do
     |> Enum.map(fn msg ->
       role = if msg["role"] == "assistant", do: "model", else: "user"
 
-      parts = case msg["content"] do
-        content when is_list(content) ->
-          Enum.map(content, fn
-            %{"type" => "text", "text" => text} ->
-              %{text: text}
-            %{"type" => "image", "source" => %{"type" => "base64", "media_type" => mt, "data" => data}} ->
-              %{inline_data: %{mime_type: mt, data: data}}
-            other ->
-              %{text: inspect(other)}
-          end)
-        content when is_binary(content) ->
-          [%{text: content}]
-        _ ->
-          [%{text: ""}]
-      end
+      parts =
+        case msg["content"] do
+          content when is_list(content) ->
+            Enum.map(content, fn
+              %{"type" => "text", "text" => text} ->
+                %{text: text}
+
+              %{
+                "type" => "image",
+                "source" => %{"type" => "base64", "media_type" => mt, "data" => data}
+              } ->
+                %{inline_data: %{mime_type: mt, data: data}}
+
+              other ->
+                %{text: inspect(other)}
+            end)
+
+          content when is_binary(content) ->
+            [%{text: content}]
+
+          _ ->
+            [%{text: ""}]
+        end
 
       %{role: role, parts: parts}
     end)
   end
-
 end

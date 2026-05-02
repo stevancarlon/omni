@@ -41,6 +41,8 @@ defmodule OmniBackendWeb.LLMController do
         detail: "Valid providers: #{@providers |> Map.keys() |> Enum.join(", ")}"
       })
     else
+      resolved_model = model || provider_default_model(provider)
+
       has_images =
         Enum.any?(messages, fn msg ->
           case msg["content"] do
@@ -52,7 +54,7 @@ defmodule OmniBackendWeb.LLMController do
       require Logger
 
       Logger.info(
-        "LLM request: provider=#{provider_name} model=#{model || "default"} msgs=#{length(messages)} images=#{has_images}"
+        "LLM request: provider=#{provider_name} model=#{resolved_model} msgs=#{length(messages)} images=#{has_images}"
       )
 
       case provider.completions(model, system, messages) do
@@ -60,10 +62,28 @@ defmodule OmniBackendWeb.LLMController do
           json(conn, %{content: content})
 
         {:error, reason} ->
+          Logger.error(
+            "LLM provider failure: provider=#{provider_name} model=#{resolved_model} msgs=#{length(messages)} images=#{has_images} reason=#{inspect(reason)}"
+          )
+
           conn
           |> put_status(:bad_gateway)
-          |> json(%{error: "llm_error", detail: reason})
+          |> json(%{
+            error: "llm_error",
+            provider: provider_name,
+            model: resolved_model,
+            images: has_images,
+            detail: reason
+          })
       end
+    end
+  end
+
+  defp provider_default_model(provider) do
+    if function_exported?(provider, :default_model, 0) do
+      provider.default_model()
+    else
+      "default"
     end
   end
 

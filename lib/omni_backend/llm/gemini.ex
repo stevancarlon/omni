@@ -13,22 +13,16 @@ defmodule OmniBackend.LLM.Gemini do
       {:ok, _} = success ->
         success
 
-      {:error, reason} = error ->
-        if model == @default_model && rate_limited?(reason) do
+      {:error, reason} ->
+        if model == @default_model do
           require Logger
-          Logger.warning("Gemini #{@default_model} rate limited, falling back to #{@fallback_model}")
+          Logger.warning("Gemini #{@default_model} failed (#{reason}), falling back to #{@fallback_model}")
           do_request(@fallback_model, system, messages)
         else
-          error
+          {:error, reason}
         end
     end
   end
-
-  defp rate_limited?(reason) when is_binary(reason) do
-    String.contains?(reason, "429") || String.contains?(reason, "503") ||
-      String.contains?(reason, "RESOURCE_EXHAUSTED") || String.contains?(reason, "UNAVAILABLE")
-  end
-  defp rate_limited?(_), do: false
 
   defp do_request(model, system, messages) do
     api_key = Application.get_env(:omni_backend, :gemini_api_key)

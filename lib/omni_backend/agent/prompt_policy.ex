@@ -81,6 +81,34 @@ defmodule OmniBackend.Agent.PromptPolicy do
     """
   end
 
+  def app_profile(:whatsapp) do
+    """
+
+    ═══ APP PROFILE :whatsapp — WHATSAPP ═══
+    The user usually wants to send a message or make a call with minimum detours.
+    - For "send/message/text X", prioritize: search/select contact or chat → type message → Send.
+    - If the correct chat is open and the composed message is present, tap Send immediately.
+    - Do not open contact info, profile photos, media galleries, stickers, attachments, emoji panels, calls, communities, status, or overflow menus unless explicitly requested.
+    - If WhatsApp shows multiple contact results, choose the result whose visible name best matches the requested recipient.
+    - If the message is sent or visibly appears in the conversation, return done(success=true).
+    - If the recipient cannot be found, return done(success=false) instead of messaging the wrong person.
+    """
+  end
+
+  def app_profile(:telegram) do
+    """
+
+    ═══ APP PROFILE :telegram — TELEGRAM ═══
+    The user usually wants to send a message or open a chat/channel directly.
+    - For "send/message/text X", prioritize: search/select chat or contact → type message → Send.
+    - If the correct chat is open and the composed message is present, tap Send immediately.
+    - Do not open profile/info pages, media, stickers, attachments, folders, archived chats, calls, or overflow menus unless explicitly requested.
+    - If Telegram shows multiple results, prefer exact visible contact/chat matches over channels, bots, and global search results unless the user asked for those.
+    - If the message is sent or visibly appears in the conversation, return done(success=true).
+    - If the recipient/chat cannot be found, return done(success=false) instead of messaging the wrong target.
+    """
+  end
+
   def app_profile(_), do: ""
 
   def infer_app_profile(goal, foreground_package) do
@@ -111,6 +139,14 @@ defmodule OmniBackend.Agent.PromptPolicy do
       contains_any?(haystack, ["ifood", "i food", "order food", "delivery", "restaurant"]) ||
           foreground_package == "br.com.brainweb.ifood" ->
         :ifood
+
+      contains_any?(haystack, ["whatsapp", "whats app", "zap", "zapp"]) ||
+          foreground_package in ["com.whatsapp", "com.whatsapp.w4b"] ->
+        :whatsapp
+
+      contains_any?(haystack, ["telegram", "telegran"]) ||
+          foreground_package in ["org.telegram.messenger", "org.thunderdog.challegram"] ->
+        :telegram
 
       true ->
         nil
@@ -144,6 +180,8 @@ defmodule OmniBackend.Agent.PromptPolicy do
   defp normalize_app_profile("youtube_music"), do: :youtube_music
   defp normalize_app_profile("youtube"), do: :youtube
   defp normalize_app_profile("ifood"), do: :ifood
+  defp normalize_app_profile("whatsapp"), do: :whatsapp
+  defp normalize_app_profile("telegram"), do: :telegram
   defp normalize_app_profile(_), do: nil
 
   defp contains_any?(text, needles) do

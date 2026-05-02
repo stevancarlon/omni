@@ -21,28 +21,39 @@ defmodule OmniBackendWeb.LLMController do
   def completions(conn, params) do
     _user = conn.assigns.current_user
     messages = params["messages"] || []
+
     system =
       (params["system"] || PromptPolicy.default_system())
-      |> PromptPolicy.append()
+      |> PromptPolicy.append(app_profile: params["app_profile"])
 
     model = params["model"]
-    provider_name = params["provider"] || Application.get_env(:omni_backend, :default_llm_provider, "claude")
+
+    provider_name =
+      params["provider"] || Application.get_env(:omni_backend, :default_llm_provider, "claude")
 
     provider = Map.get(@providers, provider_name)
 
     if is_nil(provider) do
       conn
       |> put_status(:bad_request)
-      |> json(%{error: "unknown_provider", detail: "Valid providers: #{@providers |> Map.keys() |> Enum.join(", ")}"})
+      |> json(%{
+        error: "unknown_provider",
+        detail: "Valid providers: #{@providers |> Map.keys() |> Enum.join(", ")}"
+      })
     else
-      has_images = Enum.any?(messages, fn msg ->
-        case msg["content"] do
-          content when is_list(content) -> Enum.any?(content, fn b -> b["type"] == "image" end)
-          _ -> false
-        end
-      end)
+      has_images =
+        Enum.any?(messages, fn msg ->
+          case msg["content"] do
+            content when is_list(content) -> Enum.any?(content, fn b -> b["type"] == "image" end)
+            _ -> false
+          end
+        end)
+
       require Logger
-      Logger.info("LLM request: provider=#{provider_name} model=#{model || "default"} msgs=#{length(messages)} images=#{has_images}")
+
+      Logger.info(
+        "LLM request: provider=#{provider_name} model=#{model || "default"} msgs=#{length(messages)} images=#{has_images}"
+      )
 
       case provider.completions(model, system, messages) do
         {:ok, content} ->
@@ -61,7 +72,7 @@ defmodule OmniBackendWeb.LLMController do
     provider = params["provider"] || Application.get_env(:omni_backend, :default_llm_provider)
     model = params["model"] || Application.get_env(:omni_backend, :default_llm_model)
     messages = params["messages"] || []
-    system = PromptPolicy.append(params["system"])
+    system = PromptPolicy.append(params["system"], app_profile: params["app_profile"])
 
     conn =
       conn

@@ -21,7 +21,7 @@ if System.get_env("PHX_SERVER") do
 end
 
 config :omni_backend, OmniBackendWeb.Endpoint,
-  http: [port: String.to_integer(System.get_env("PORT", "4000"))]
+  http: [port: String.to_integer(System.get_env("PORT", "10000"))]
 
 # API keys — set via environment variables
 config :omni_backend,
@@ -55,11 +55,9 @@ if config_env() == :prod do
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 
   config :omni_backend, OmniBackend.Repo,
-    # ssl: true,
+    ssl: [verify: :verify_none],
     url: database_url,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
-    # For machines with several cores, consider starting multiple pools of `pool_size`
-    # pool_count: 4,
     socket_options: maybe_ipv6
 
   # The secret key base is used to sign/encrypt cookies and other secrets.

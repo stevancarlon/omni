@@ -3,13 +3,34 @@ defmodule OmniBackend.LLM.Gemini do
   @behaviour OmniBackend.LLM.Provider
 
   @default_model "gemini-2.5-pro"
+  @fallback_model "gemini-2.5-flash"
 
   @impl true
   def completions(model, system, messages) do
-    api_key = Application.get_env(:omni_backend, :gemini_api_key)
     model = if model in [nil, ""], do: @default_model, else: model
 
-    # Convert messages to Gemini format
+    case do_request(model, system, messages) do
+      {:ok, _} = success ->
+        success
+
+      {:error, reason} = error ->
+        if model == @default_model && rate_limited?(reason) do
+          require Logger
+          Logger.warning("Gemini #{@default_model} rate limited, falling back to #{@fallback_model}")
+          do_request(@fallback_model, system, messages)
+        else
+          error
+        end
+    end
+  end
+
+  defp rate_limited?(reason) when is_binary(reason) do
+    String.contains?(reason, "429") || String.contains?(reason, "RESOURCE_EXHAUSTED")
+  end
+  defp rate_limited?(_), do: false
+
+  defp do_request(model, system, messages) do
+    api_key = Application.get_env(:omni_backend, :gemini_api_key)
     gemini_contents = convert_messages(messages)
 
     url = "https://generativelanguage.googleapis.com/v1beta/models/#{model}:generateContent?key=#{api_key}"

@@ -12,7 +12,8 @@ defmodule OmniBackendWeb.LLMController do
   @providers %{
     "claude" => OmniBackend.LLM.Claude,
     "openai" => OmniBackend.LLM.OpenAI,
-    "groq" => OmniBackend.LLM.Groq
+    "groq" => OmniBackend.LLM.Groq,
+    "gemini" => OmniBackend.LLM.Gemini
   }
 
   def completions(conn, params) do

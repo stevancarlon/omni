@@ -2,6 +2,8 @@ defmodule OmniBackendWeb.HealthController do
   use OmniBackendWeb, :controller
 
   def check(conn, _params) do
-    json(conn, %{status: "ok"})
+    conn
+    |> Plug.Conn.put_private(:phoenix_quiet, true)
+    |> json(%{status: "ok"})
   end
 end

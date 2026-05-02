@@ -26,6 +26,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -370,14 +373,14 @@ private fun OverlayPill(
     val statusText = when (status) {
         is AgentStatus.VoiceListening -> "Listening\u2026"
         is AgentStatus.Processing -> "Thinking\u2026"
-        is AgentStatus.Executing -> "Step ${status.step}/${status.maxSteps} · ${status.lastAction}"
+        is AgentStatus.Executing -> "${status.step}/${status.maxSteps}"
         is AgentStatus.Done -> if (status.success) "Done!" else status.reason
         is AgentStatus.Error -> "Error"
         else -> "Omni"
     }
     // Figma overlay variants (257:4..257:42): Listening shows orb + status only
     // (no Cancel). Thinking / Executing show orb + status + Cancel.
-    val showCancel = status is AgentStatus.Processing || status is AgentStatus.Executing
+    val showStop = status is AgentStatus.Processing || status is AgentStatus.Executing
 
     Box(
         modifier = Modifier
@@ -424,10 +427,10 @@ private fun OverlayPill(
                 )
             }
 
-            // Cancel pill — text per Figma anatomy (256:11), only for active work
-            if (showCancel) {
+            if (showStop) {
                 Box(
                     modifier = Modifier
+                        .size(36.dp)
                         .clip(OmniShapes.Pill)
                         .background(OmniColors.Surface.copy(alpha = 0.5f))
                         .border(
@@ -437,18 +440,14 @@ private fun OverlayPill(
                         )
                         .clickable {
                             onCancel()
-                        }
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                        },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        text = "Cancel",
-                        style = TextStyle(
-                            brush = OmniGradients.SilverText,
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 14.sp,
-                        ),
-                        maxLines = 1,
+                    Icon(
+                        imageVector = Icons.Filled.Stop,
+                        contentDescription = "Stop",
+                        tint = Color.White.copy(alpha = 0.86f),
+                        modifier = Modifier.size(18.dp),
                     )
                 }
             }

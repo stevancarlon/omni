@@ -1,5 +1,6 @@
 defmodule OmniBackend.Billing.GooglePlay do
   @moduledoc "Verifies Android subscription purchases with Google Play Developer API."
+  require Logger
 
   @scope "https://www.googleapis.com/auth/androidpublisher"
   @default_token_uri "https://oauth2.googleapis.com/token"
@@ -10,10 +11,25 @@ defmodule OmniBackend.Billing.GooglePlay do
       }) do
     package_name = Application.get_env(:omni_backend, :google_play_package_name)
 
+    Logger.info(
+      "google_play_verify_start #{inspect(%{package_name: package_name, product_id: product_id})}"
+    )
+
     with :ok <- require_config(package_name, purchase_token),
          {:ok, access_token} <- access_token(),
          {:ok, response} <- fetch_purchase(access_token, package_name, product_id, purchase_token) do
+      Logger.info(
+        "google_play_verify_success #{inspect(%{package_name: package_name, product_id: product_id})}"
+      )
+
       {:ok, build_result(package_name, product_id, purchase_token, response)}
+    else
+      {:error, reason} ->
+        Logger.error(
+          "google_play_verify_failed #{inspect(%{package_name: package_name, product_id: product_id, reason: sanitize_reason(reason)})}"
+        )
+
+        {:error, reason}
     end
   end
 
@@ -178,6 +194,46 @@ defmodule OmniBackend.Billing.GooglePlay do
         {:error, {:google_play_unreachable, reason}}
     end
   end
+
+  defp sanitize_reason({:google_oauth_error, status, body}) do
+    {:google_oauth_error, status, summarize_google_error(body)}
+  end
+
+  defp sanitize_reason({:google_play_error, status, body}) do
+    {:google_play_error, status, summarize_google_error(body)}
+  end
+
+  defp sanitize_reason({:google_oauth_unreachable, reason}) do
+    {:google_oauth_unreachable, Exception.message(reason)}
+  rescue
+    _ -> {:google_oauth_unreachable, inspect(reason)}
+  end
+
+  defp sanitize_reason({:google_play_unreachable, reason}) do
+    {:google_play_unreachable, Exception.message(reason)}
+  rescue
+    _ -> {:google_play_unreachable, inspect(reason)}
+  end
+
+  defp sanitize_reason(reason), do: reason
+
+  defp summarize_google_error(%{"error" => error}) when is_map(error) do
+    %{
+      code: error["code"],
+      status: error["status"],
+      message: error["message"],
+      reasons:
+        Enum.map(error["errors"] || [], fn item ->
+          %{
+            domain: item["domain"],
+            reason: item["reason"],
+            message: item["message"]
+          }
+        end)
+    }
+  end
+
+  defp summarize_google_error(body), do: body
 
   defp build_result(package_name, product_id, purchase_token, response) do
     expiry_ms = parse_int(response["expiryTimeMillis"])

@@ -8,6 +8,7 @@ Copy `.env.example` to `.env` and fill in the values. Local Mix tasks load `.env
 
 - `GOOGLE_WEB_CLIENT_ID` verifies Google ID tokens from Android sign-in.
 - `GOOGLE_PLAY_PACKAGE_NAME`, `GOOGLE_PLAY_*_PRODUCT_ID`, and `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` verify Android subscription purchases.
+- Prefer `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_B64` in hosted environments: base64-encode the Google Cloud service account JSON and set that single-line value instead of pasting multiline JSON.
 - `DEFAULT_LLM_PROVIDER`, `DEFAULT_LLM_MODEL`, `GROQ_API_KEY`, and `DEEPGRAM_API_KEY` stay backend-side only.
 
 ## Local Database

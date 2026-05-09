@@ -38,7 +38,9 @@ config :omni_backend,
   google_play_pro_product_id: System.get_env("GOOGLE_PLAY_PRO_PRODUCT_ID", "omni_pro_monthly"),
   google_play_unlimited_product_id:
     System.get_env("GOOGLE_PLAY_UNLIMITED_PRODUCT_ID", "omni_unlimited_monthly"),
-  google_play_service_account_json: System.get_env("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"),
+  google_play_service_account_json:
+    System.get_env("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON") ||
+      System.get_env("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_B64"),
   stripe_webhook_secret: System.get_env("STRIPE_WEBHOOK_SECRET")
 
 config :stripity_stripe,

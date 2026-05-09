@@ -67,7 +67,66 @@ defmodule OmniBackend.Billing.GooglePlay do
     case Application.get_env(:omni_backend, :google_play_service_account_json) do
       nil -> {:error, :google_play_service_account_not_configured}
       "" -> {:error, :google_play_service_account_not_configured}
-      json -> Jason.decode(json)
+      json -> decode_service_account(json)
+    end
+  end
+
+  defp decode_service_account(value) when is_binary(value) do
+    value = String.trim(value)
+
+    with {:ok, decoded} <- decode_json_or_b64_json(value),
+         {:ok, service_account} <- unwrap_service_account(decoded) do
+      validate_service_account(service_account)
+    end
+  end
+
+  defp decode_json_or_b64_json(value) do
+    case Jason.decode(value) do
+      {:ok, decoded} ->
+        {:ok, decoded}
+
+      {:error, json_error} ->
+        case Base.decode64(value, padding: false) do
+          {:ok, decoded_value} ->
+            Jason.decode(decoded_value)
+
+          :error ->
+            case Base.decode64(value) do
+              {:ok, decoded_value} -> Jason.decode(decoded_value)
+              :error -> {:error, {:invalid_google_service_account_json, json_error}}
+            end
+        end
+    end
+  end
+
+  defp unwrap_service_account(%{"type" => "service_account"} = service_account),
+    do: {:ok, service_account}
+
+  defp unwrap_service_account(%{"service_account" => service_account})
+       when is_map(service_account),
+       do: {:ok, service_account}
+
+  defp unwrap_service_account(%{"web" => _}),
+    do: {:error, {:invalid_google_service_account, :oauth_web_client_json_provided}}
+
+  defp unwrap_service_account(%{"installed" => _}),
+    do: {:error, {:invalid_google_service_account, :oauth_installed_client_json_provided}}
+
+  defp unwrap_service_account(decoded) when is_map(decoded), do: {:ok, decoded}
+  defp unwrap_service_account(_), do: {:error, :invalid_google_service_account}
+
+  defp validate_service_account(service_account) do
+    required_fields = ["client_email", "private_key"]
+
+    missing_fields =
+      Enum.filter(required_fields, fn field ->
+        not is_binary(service_account[field]) or service_account[field] == ""
+      end)
+
+    if missing_fields == [] do
+      {:ok, service_account}
+    else
+      {:error, {:invalid_google_service_account, missing_fields: missing_fields}}
     end
   end
 

@@ -51,11 +51,6 @@ class DeepgramClient(
     private val normalizedWakeWords = listOf(
         normalizePhrase(wakeWord),
         normalizePhrase("hey omni"),
-        normalizePhrase("hey homie"),
-        normalizePhrase("hey umini"),
-        normalizePhrase("hey umni"),
-        normalizePhrase("hey mini"),
-        normalizePhrase("hey omie"),
     ).filter { it.isNotBlank() }.distinct()
     private var commandModeStartTime = 0L
     private var ignoreUntil = 0L
@@ -477,7 +472,9 @@ class DeepgramClient(
         val normalized = normalizePhrase(text)
         if (normalized.isBlank()) return null
 
-        normalizedWakeWords.firstOrNull { normalized.contains(it) }?.let {
+        normalizedWakeWords.firstOrNull { phrase ->
+            phrase.split(" ").size >= 2 && normalized.contains(phrase)
+        }?.let {
             return "phrase:$it"
         }
 
@@ -488,19 +485,6 @@ class DeepgramClient(
             .split(" ")
             .filter { it.isNotBlank() }
             .ifEmpty { listOf("hey", "omni") }
-
-        val phraseScore = orderedPhraseScore(words, wakeTokens)
-        if (phraseScore >= WAKE_PHRASE_SCORE_THRESHOLD) {
-            return "phraseScore:${"%.2f".format(phraseScore)}"
-        }
-
-        val anchorToken = wakeTokens.lastOrNull() ?: "omni"
-        val bestAnchor = words
-            .map { it to tokenSimilarity(it, anchorToken) }
-            .maxByOrNull { it.second }
-        if (bestAnchor != null && bestAnchor.second >= WAKE_ANCHOR_SCORE_THRESHOLD) {
-            return "anchor:${bestAnchor.first}:${"%.2f".format(bestAnchor.second)}"
-        }
 
         if (words.size >= wakeTokens.size) {
             var bestWindow = 0.0
@@ -518,30 +502,6 @@ class DeepgramClient(
         return null
     }
 
-    private fun orderedPhraseScore(words: List<String>, wakeTokens: List<String>): Double {
-        if (words.isEmpty() || wakeTokens.isEmpty()) return 0.0
-        var searchFrom = 0
-        var score = 0.0
-        var matched = 0
-        for (target in wakeTokens) {
-            var bestIndex = -1
-            var bestScore = 0.0
-            for (i in searchFrom until words.size) {
-                val candidateScore = tokenSimilarity(words[i], target)
-                if (candidateScore > bestScore) {
-                    bestScore = candidateScore
-                    bestIndex = i
-                }
-            }
-            if (bestIndex == -1) continue
-            score += bestScore
-            matched += 1
-            searchFrom = bestIndex + 1
-        }
-        val coverage = matched.toDouble() / wakeTokens.size
-        return (score / wakeTokens.size) * coverage
-    }
-
     private fun tokenSimilarity(candidate: String, target: String): Double {
         if (candidate.isBlank() || target.isBlank()) return 0.0
         if (candidate == target) return 1.0
@@ -549,7 +509,10 @@ class DeepgramClient(
         val maxLength = maxOf(candidate.length, target.length).toDouble()
         val editScore = 1.0 - (editDistance(candidate, target) / maxLength)
         val prefixScore = commonPrefixLength(candidate, target) / maxLength
-        val substringScore = if (candidate.contains(target) || target.contains(candidate)) 0.86 else 0.0
+        val substringScore = if (
+            minOf(candidate.length, target.length) >= 4 &&
+            (candidate.contains(target) || target.contains(candidate))
+        ) 0.86 else 0.0
 
         return maxOf(editScore, prefixScore, substringScore).coerceIn(0.0, 1.0)
     }
@@ -685,10 +648,8 @@ class DeepgramClient(
         private const val PENDING_MAX_BYTES = 96000  // ~3s of buffered audio while WS handshakes
         private const val DEAD_STREAM_PEAK_THRESHOLD = 8
         private const val SILENT_SOURCE_FALLBACK_MS = 4_000L
-        private val WAKE_WORD_ALIASES = setOf("omni", "umini", "umni", "mini", "omie", "homie")
-        private const val WAKE_PHRASE_SCORE_THRESHOLD = 0.55
-        private const val WAKE_ANCHOR_SCORE_THRESHOLD = 0.50
-        private const val WAKE_WINDOW_SCORE_THRESHOLD = 0.58
+        private val WAKE_WORD_ALIASES = setOf("omni")
+        private const val WAKE_WINDOW_SCORE_THRESHOLD = 0.92
         private val STOP_VERBS = setOf("stop", "para", "pare")
         private val STOP_PHRASES = setOf("stop omni", "stop homie", "para omni", "pare omni")
     }

@@ -435,7 +435,7 @@ class OmniListenerService : Service() {
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, silenceMs)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, partialSilenceMs)
             val biasingStrings = if (wakeWordMode) {
-                listOf(cachedWakeWord, "hey omni", "omni", "hey homie")
+                listOf(cachedWakeWord, "hey omni")
             } else {
                 appNames
             }
@@ -524,8 +524,7 @@ class OmniListenerService : Service() {
         val normalizedText = text.lowercase().replace(Regex("[^a-z ]"), " ").replace(Regex("\\s+"), " ").trim()
         val normalizedWake = cachedWakeWord.lowercase().replace(Regex("[^a-z ]"), " ").replace(Regex("\\s+"), " ").trim()
         return normalizedText.contains(normalizedWake) ||
-            normalizedText.contains("hey omni") ||
-            normalizedText.contains("hey homie")
+            normalizedText.contains("hey omni")
     }
 
     private fun handleCommandResult(text: String, candidates: List<String>) {

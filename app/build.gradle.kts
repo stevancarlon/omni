@@ -9,6 +9,7 @@ plugins {
 android {
     namespace = "com.omni.assistant"
     compileSdk = 35
+    val productionBackendUrl = "https://omni-backend-bq8e.onrender.com"
 
     val localProperties = Properties().apply {
         val localPropertiesFile = rootProject.file("local.properties")
@@ -16,13 +17,20 @@ android {
             localPropertiesFile.inputStream().use(::load)
         }
     }
-    val localBackendUrl = localProperties.getProperty("OMNI_BACKEND_URL")
+    val localBackendUrl = localProperties.getProperty("OMNI_DEBUG_BACKEND_URL")
         ?.takeIf { it.isNotBlank() }
-        ?: "https://omni-backend-bq8e.onrender.com"
-
-    val defaultBackendUrl = providers.gradleProperty("OMNI_BACKEND_URL")
+        ?: localProperties.getProperty("OMNI_BACKEND_URL")
+        ?.takeIf { it.isNotBlank() }
+        ?: productionBackendUrl
+    val debugBackendUrl = providers.gradleProperty("OMNI_DEBUG_BACKEND_URL")
+        .orElse(providers.environmentVariable("OMNI_DEBUG_BACKEND_URL"))
+        .orElse(providers.gradleProperty("OMNI_BACKEND_URL"))
         .orElse(providers.environmentVariable("OMNI_BACKEND_URL"))
         .orElse(localBackendUrl)
+        .get()
+    val releaseBackendUrl = providers.gradleProperty("OMNI_RELEASE_BACKEND_URL")
+        .orElse(providers.environmentVariable("OMNI_RELEASE_BACKEND_URL"))
+        .orElse(productionBackendUrl)
         .get()
 
     signingConfigs {
@@ -38,15 +46,19 @@ android {
         applicationId = "com.omni.orb"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
-        buildConfigField("String", "DEFAULT_BACKEND_URL", "\"$defaultBackendUrl\"")
+        versionCode = 3
+        versionName = "1.0.2"
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("release")
+            buildConfigField("String", "DEFAULT_BACKEND_URL", "\"$debugBackendUrl\"")
+        }
         release {
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("release")
+            buildConfigField("String", "DEFAULT_BACKEND_URL", "\"$releaseBackendUrl\"")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

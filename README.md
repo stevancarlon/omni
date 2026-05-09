@@ -19,12 +19,47 @@ Say **"Hey Omni"** or tap **Start Listening**, speak a command, and Omni will re
 3. Grant microphone, accessibility, and always-on-top permissions
 4. Subscribe through Google Play to enable agent runs and wake word
 
+## Google sign-in configuration
+
+The Play Store package name is `com.omni.orb`.
+
+Google OAuth must know every signing certificate used to install the app. The Web client ID stays the same, but Google Cloud needs one Android OAuth client per package/signature pair.
+
+For internal testing builds distributed by Google Play, configure an Android OAuth client with the Play app signing certificate:
+
+1. In Play Console, open **Test and release > Setup > App signing**.
+2. Copy the SHA-1 fingerprint from **App signing key certificate**.
+3. In Google Cloud Console, create or update an **Android** OAuth client for package `com.omni.orb` and that SHA-1 fingerprint.
+4. Keep the Android app's `google_web_client_id` set to the **Web** OAuth client ID, and set the backend `GOOGLE_WEB_CLIENT_ID` to the same value.
+
+For locally installed debug/release APKs, also create an Android OAuth client for package `com.omni.orb` with this repository's upload key SHA-1:
+
+```text
+42:12:51:B9:E5:66:E0:96:53:5B:5D:9F:0F:B3:A1:3D:B3:C9:17:E6
+```
+
 ## Build
 
 ```bash
 ./gradlew assembleDebug
 ./gradlew installDebug
 ```
+
+## Backend endpoint
+
+Release builds always use:
+
+```text
+https://omni-backend-bq8e.onrender.com
+```
+
+Do not use `OMNI_BACKEND_URL` for release builds. Debug builds can point at a tunnel or local backend with:
+
+```properties
+OMNI_DEBUG_BACKEND_URL=https://your-debug-endpoint.example
+```
+
+Only use `OMNI_RELEASE_BACKEND_URL` for an intentional production backend migration.
 
 ## Tech stack
 

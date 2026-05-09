@@ -62,6 +62,7 @@ import com.omni.assistant.ui.theme.OmniGradients
 import com.omni.assistant.ui.theme.OmniShapes
 import com.omni.assistant.ui.theme.OmniTextMetrics
 import com.omni.assistant.ui.theme.GradientIcon
+import com.omni.assistant.ui.theme.OmniButton
 import com.omni.assistant.ui.theme.OmniIconButton
 import com.omni.assistant.ui.theme.dockPillStyle
 import kotlin.math.PI
@@ -830,24 +831,124 @@ private fun DoneLayout(
         )
 
         if (pendingMemory != null) {
-            AlertDialog(
-                onDismissRequest = { agentController.dismissMemory() },
-                containerColor = Color(0xFF1A1E2E),
-                titleContentColor = OmniColors.Ink,
-                textContentColor = OmniColors.InkMute,
-                title = { Text("Did that work?", fontWeight = FontWeight.Medium) },
-                text = { Text("Save this task so Omni can learn from it and be faster next time.", fontSize = 13.sp) },
-                confirmButton = {
-                    TextButton(onClick = { agentController.confirmMemory(true) }) {
-                        Text("Yes, save it", color = OmniColors.BrandBlueGlow)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { agentController.confirmMemory(false) }) {
-                        Text("No", color = OmniColors.InkMute)
-                    }
-                },
+            MemoryConfirmCard(
+                onConfirm = { agentController.confirmMemory(true) },
+                onDismiss = { agentController.confirmMemory(false) },
+                onClose = { agentController.dismissMemory() },
             )
+        }
+    }
+}
+
+@Composable
+private fun MemoryConfirmCard(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.42f))
+            .clickable(
+                indication = null,
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                onClick = onClose,
+            )
+            .padding(horizontal = 24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    onClick = {},
+                )
+                .shadow(
+                    elevation = 32.dp,
+                    shape = OmniShapes.CardLg,
+                    ambientColor = OmniColors.BrandBlueGlow.copy(alpha = 0.22f),
+                    spotColor = OmniColors.BrandBlueGlow.copy(alpha = 0.22f),
+                )
+                .dockPillStyle(OmniShapes.CardLg)
+                .padding(20.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(OmniColors.BrandBlueGlow.copy(alpha = 0.12f))
+                        .border(1.dp, OmniColors.BrandBlueGlow.copy(alpha = 0.35f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = OmniColors.BrandBlueGlow,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Did that work?",
+                        color = OmniColors.Ink,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "Save this task so Omni can learn the path.",
+                        color = OmniColors.InkMute,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                    )
+                }
+                IconButton(onClick = onClose, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = OmniColors.InkMute,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(18.dp))
+
+            OmniButton(
+                onClick = onConfirm,
+                fillMaxWidth = true,
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 13.dp),
+            ) {
+                Text(
+                    "Yes, save it",
+                    color = OmniColors.Ink,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(OmniShapes.Pill)
+                    .border(1.dp, OmniColors.InkGhost, OmniShapes.Pill)
+                    .clickable(onClick = onDismiss)
+                    .padding(vertical = 13.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "No, not this time",
+                    color = OmniColors.InkMute,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
         }
     }
 }

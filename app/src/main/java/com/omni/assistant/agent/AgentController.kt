@@ -44,6 +44,7 @@ class AgentController private constructor(private val app: OmniApplication) {
     fun confirmMemory(success: Boolean) {
         val pending = _pendingMemory.value ?: return
         _pendingMemory.value = null
+        scheduleTerminalResetIfDone()
         if (success) {
             scope.launch {
                 try {
@@ -57,6 +58,7 @@ class AgentController private constructor(private val app: OmniApplication) {
 
     fun dismissMemory() {
         _pendingMemory.value = null
+        scheduleTerminalResetIfDone()
     }
 
     init {
@@ -222,9 +224,10 @@ class AgentController private constructor(private val app: OmniApplication) {
 
             val fgApp = OmniAccessibilityService.foregroundPackage.value
             // Track the target app (first non-Omni app we enter)
-            if (targetApp.isBlank() && fgApp.isNotBlank() && fgApp != "com.omni.assistant") {
+            if (targetApp.isBlank() && fgApp.isNotBlank() && !fgApp.startsWith("com.omni.")) {
                 targetApp = fgApp
             }
+            val appContext = targetApp.ifBlank { fgApp }
 
             _status.value = AgentStatus.Executing(goal, step, maxSteps, "Thinking...")
             addLog("Step $step: ${screenLegend.lines().size} marks in $fgApp${if (screenshot != null) " + screenshot" else ""}")
@@ -233,7 +236,7 @@ class AgentController private constructor(private val app: OmniApplication) {
             val warnings = buildStepWarnings(consecutiveUnchanged, step, maxSteps, recentActions)
 
             val response = try {
-                llmClient.getNextAction(goal, screenLegend, history, voiceCandidates, warnings, screenshot, step == 1, fgApp, pastGuidance)
+                llmClient.getNextAction(goal, screenLegend, history, voiceCandidates, warnings, screenshot, step == 1, appContext, pastGuidance)
             } catch (e: Exception) {
                 addLog("LLM error: ${e.message}")
                 fail("LLM error: ${e.message}")
@@ -376,9 +379,17 @@ class AgentController private constructor(private val app: OmniApplication) {
     private fun scheduleTerminalReset(isStillTerminalState: () -> Boolean) {
         terminalResetJob = scope.launch {
             delay(TERMINAL_VISIBLE_MS)
+            if (_pendingMemory.value != null) return@launch
             if (isStillTerminalState()) {
                 _status.value = AgentStatus.Idle
             }
+        }
+    }
+
+    private fun scheduleTerminalResetIfDone() {
+        if (_status.value is AgentStatus.Done) {
+            cancelTerminalReset()
+            scheduleTerminalReset { _status.value is AgentStatus.Done }
         }
     }
 

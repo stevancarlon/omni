@@ -26,15 +26,20 @@ class AudioRecorder(
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val audioBuffer = ByteArrayOutputStream()
 
-    fun start(context: Context) {
+    fun start(context: Context): Boolean {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED) {
-            return
+            Log.w(TAG, "Microphone permission not granted")
+            return false
         }
 
         val bufferSize = AudioRecord.getMinBufferSize(
             SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
         )
+        if (bufferSize <= 0) {
+            Log.e(TAG, "Invalid AudioRecord buffer size: $bufferSize")
+            return false
+        }
 
         val sources = intArrayOf(
             MediaRecorder.AudioSource.MIC,
@@ -47,15 +52,26 @@ class AudioRecorder(
                     AudioFormat.ENCODING_PCM_16BIT, bufferSize * 2)
             } catch (_: Exception) { continue }
             if (rec.state == AudioRecord.STATE_INITIALIZED) {
+                Log.d(TAG, "Using command audio source=$src")
                 selected = rec
                 break
             }
             rec.release()
         }
-        audioRecord = selected ?: return
+        audioRecord = selected ?: run {
+            Log.e(TAG, "Failed to initialize command audio recorder")
+            return false
+        }
 
         audioBuffer.reset()
-        audioRecord?.startRecording()
+        try {
+            audioRecord?.startRecording()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start command audio recorder: ${e.message}")
+            audioRecord?.release()
+            audioRecord = null
+            return false
+        }
         isRecording = true
 
         recordingJob = scope.launch {
@@ -179,6 +195,8 @@ class AudioRecorder(
                 }
             }
         }
+
+        return true
     }
 
     private fun requiredSilenceMs(noiseFloor: Double): Long {

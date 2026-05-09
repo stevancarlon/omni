@@ -73,6 +73,7 @@ class OmniListenerService : Service() {
             reloadSettings()
             when (intent?.action) {
                 ACTION_START_COMMAND_LISTENING -> {
+                    Log.d(TAG, "Manual command listening requested")
                     cancelReturnToWake()
                     startedFromWakeWord = false
                     agentController.onWakeWordDetected()
@@ -167,6 +168,7 @@ class OmniListenerService : Service() {
         isListeningForWakeWord = false
         isListeningForCommand = true
         updateNotification("Listening... speak your command")
+        Log.d(TAG, "Starting command listening")
 
         // Stop wake word listener — mic can't be shared
         deepgramClient?.stop()
@@ -213,7 +215,16 @@ class OmniListenerService : Service() {
                 }
             },
         )
-        commandRecorder?.start(this)
+        scope.launch {
+            delay(MIC_RELEASE_DELAY_MS)
+            if (!isListeningForCommand) return@launch
+            val started = commandRecorder?.start(this@OmniListenerService) == true
+            if (!started) {
+                Log.w(TAG, "Command recorder failed to start, falling back to built-in recognizer")
+                commandRecorder = null
+                startBuiltinRecognizer(wakeWordMode = false)
+            }
+        }
     }
 
     private fun shutdown() {
@@ -683,6 +694,7 @@ class OmniListenerService : Service() {
         private const val RETURN_TO_WAKE_COOLDOWN_MS = 1500L
         private const val TTS_FINISH_TIMEOUT_MS = 15_000L
         private const val COMMAND_TRANSCRIBE_TIMEOUT_MS = 35_000L
+        private const val MIC_RELEASE_DELAY_MS = 180L
         private const val DEEPGRAM_WAKE_MODEL = "flux-general-en"
         private const val DEEPGRAM_COMMAND_MODEL = "nova-3"
         const val NOTIF_ID = 1001

@@ -42,6 +42,8 @@ class LLMClient(private val app: OmniApplication) {
         val authToken = app.settingsRepository.authToken.first()
         val backendUrl = app.settingsRepository.backendUrl.first()
         val systemPrompt = app.settingsRepository.systemPrompt.first()
+        val targetProfile = AppPromptProfile.infer(goal, foregroundApp)
+        val appRules = AppPromptProfile.rulesFor(targetProfile)
 
         if (authToken.isBlank()) throw IllegalStateException("Not logged in — please sign in first")
 
@@ -54,6 +56,14 @@ class LLMClient(private val app: OmniApplication) {
             if (!warnings.isNullOrBlank()) {
                 appendLine()
                 appendLine(warnings)
+            }
+            if (targetProfile != null && isFirstStep) {
+                appendLine()
+                appendLine("Target app identified on first step: ${targetProfile.atom}")
+            }
+            if (!appRules.isNullOrBlank()) {
+                appendLine()
+                appendLine(appRules)
             }
             // Only include the full app inventory on the first step to save tokens
             if (isFirstStep) {
@@ -103,19 +113,21 @@ class LLMClient(private val app: OmniApplication) {
         }
         messages.add(mapOf("role" to "user", "content" to userMessage))
 
-        return callBackend(backendUrl, authToken, systemPrompt, messages)
+        return callBackend(backendUrl, authToken, systemPrompt, messages, targetProfile)
     }
 
     private suspend fun callBackend(
         backendUrl: String,
         authToken: String,
         systemPrompt: String,
-        messages: List<Map<String, Any>>
+        messages: List<Map<String, Any>>,
+        targetProfile: TargetAppProfile? = null,
     ): LLMResponse {
         val body = gson.toJson(mapOf(
             "system" to systemPrompt,
-            "messages" to messages
-        ))
+            "messages" to messages,
+            "app_profile" to targetProfile?.atom,
+        ).filterValues { it != null })
 
         val request = Request.Builder()
             .url("$backendUrl/api/llm/completions")
@@ -138,7 +150,9 @@ class LLMClient(private val app: OmniApplication) {
         }
         return response.use { resp ->
             val responseBody = resp.body?.string() ?: throw IOException("Empty response")
-            if (!resp.isSuccessful) throw IOException("Backend error ${resp.code}: $responseBody")
+            if (!resp.isSuccessful) {
+                throw IOException("Backend error ${resp.code}: ${parseBackendError(responseBody)}")
+            }
 
             val json = gson.fromJson(responseBody, JsonObject::class.java)
             val content = json.get("content")?.asString
@@ -223,6 +237,22 @@ class LLMClient(private val app: OmniApplication) {
         val first = text.indexOf('{')
         val last = text.lastIndexOf('}')
         return if (first >= 0 && last > first) text.substring(first, last + 1) else text
+    }
+
+    private fun parseBackendError(body: String): String {
+        return try {
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val provider = json.get("provider")?.asString
+            val model = json.get("model")?.asString
+            val detail = json.get("detail")?.asString
+            listOfNotNull(
+                provider?.let { "provider=$it" },
+                model?.let { "model=$it" },
+                detail,
+            ).joinToString(" ").ifBlank { body.take(500) }
+        } catch (_: Exception) {
+            body.take(500)
+        }
     }
 
     // ─── MobileRAG: Action Memory ───────────────────────────────────────────

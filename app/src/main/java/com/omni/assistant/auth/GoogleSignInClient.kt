@@ -5,6 +5,7 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.omni.assistant.R
@@ -37,6 +38,11 @@ class GoogleSignInClient(private val context: Context) {
 
         val credential = try {
             credentialManager.getCredential(context, request).credential
+        } catch (error: NoCredentialException) {
+            throw IllegalStateException(
+                "No Google credentials are available for this app build. Add a Google account on this device, or check that Google OAuth is configured for package com.omni.orb with this build's signing certificate.",
+                error,
+            )
         } catch (error: GetCredentialException) {
             throw IllegalStateException(error.message ?: "Google sign-in was cancelled or unavailable", error)
         }

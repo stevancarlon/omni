@@ -127,10 +127,10 @@ Don't be robotic ("Task completed successfully.") or overly formal. Keep it shor
     val authToken: Flow<String> = context.dataStore.data.map { it[KEY_AUTH_TOKEN] ?: "" }
     val backendUrl: Flow<String> = context.dataStore.data.map {
         val storedBackendUrl = it[KEY_BACKEND_URL]?.trim()
-        if (storedBackendUrl.isNullOrBlank() || storedBackendUrl != DEFAULT_BACKEND_URL) {
-            DEFAULT_BACKEND_URL
+        if (BuildConfig.DEBUG) {
+            storedBackendUrl?.takeIf { value -> value.isNotBlank() } ?: DEFAULT_BACKEND_URL
         } else {
-            storedBackendUrl
+            DEFAULT_BACKEND_URL
         }
     }
     val wakeWordEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_WAKE_WORD_ENABLED] ?: true }
@@ -150,7 +150,13 @@ Don't be robotic ("Task completed successfully.") or overly formal. Keep it shor
     val subscriptionPlan: Flow<String> = context.dataStore.data.map { it[KEY_SUBSCRIPTION_PLAN] ?: "free" }
 
     suspend fun setAuthToken(value: String) = context.dataStore.edit { it[KEY_AUTH_TOKEN] = value }
-    suspend fun setBackendUrl(value: String) = context.dataStore.edit { it[KEY_BACKEND_URL] = value }
+    suspend fun setBackendUrl(value: String) = context.dataStore.edit {
+        if (BuildConfig.DEBUG) {
+            it[KEY_BACKEND_URL] = value.trim()
+        } else {
+            it.remove(KEY_BACKEND_URL)
+        }
+    }
     suspend fun setWakeWordEnabled(value: Boolean) = context.dataStore.edit { it[KEY_WAKE_WORD_ENABLED] = value }
     suspend fun setWakeWord(value: String) = context.dataStore.edit { it[KEY_WAKE_WORD] = value }
     suspend fun setTtsEnabled(value: Boolean) = context.dataStore.edit { it[KEY_TTS_ENABLED] = value }

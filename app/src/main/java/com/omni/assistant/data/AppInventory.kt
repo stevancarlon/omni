@@ -6,7 +6,10 @@ import android.content.pm.PackageManager
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -31,6 +34,7 @@ class AppInventory(private val context: Context) {
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
         .build()
+    private var inFlightReport: Deferred<CachedReport>? = null
 
     data class CachedReport(
         val appHash: String,
@@ -41,27 +45,41 @@ class AppInventory(private val context: Context) {
     /**
      * Returns the cached LLM report, or generates a fresh one via the backend.
      */
-    suspend fun getOrGenerate(): CachedReport = withContext(Dispatchers.IO) {
+    suspend fun getOrGenerate(): CachedReport = coroutineScope {
         val currentHash = computeAppHash()
         val cached = loadCached()
         if (cached != null && cached.appHash == currentHash) {
             Log.d(TAG, "App inventory cache hit")
-            return@withContext cached
+            return@coroutineScope cached
         }
-        Log.d(TAG, "Generating app inventory via backend...")
-        val report = try {
-            generateViaBackend(currentHash)
-        } catch (e: Exception) {
-            Log.e(TAG, "Backend inventory failed: ${e.message}, using fallback")
-            CachedReport(
-                appHash = currentHash,
-                generatedAt = System.currentTimeMillis(),
-                report = generateFallback(),
-            )
+
+        val existing = synchronized(this@AppInventory) {
+            inFlightReport?.takeIf { it.isActive }
         }
-        save(report)
-        Log.d(TAG, "App inventory ready (${report.report.length} chars)")
-        report
+        if (existing != null) {
+            Log.d(TAG, "Waiting for in-flight app inventory")
+            return@coroutineScope existing.await()
+        }
+
+        val job = async(Dispatchers.IO) { generateReport(currentHash) }
+        synchronized(this@AppInventory) { inFlightReport = job }
+
+        try {
+            job.await()
+        } finally {
+            synchronized(this@AppInventory) {
+                if (inFlightReport == job) inFlightReport = null
+            }
+        }
+    }
+
+    suspend fun getCachedOrFallback(): CachedReport = withContext(Dispatchers.IO) {
+        val currentHash = computeAppHash()
+        loadCached()?.takeIf { it.appHash == currentHash } ?: CachedReport(
+            appHash = currentHash,
+            generatedAt = System.currentTimeMillis(),
+            report = generateFallback(),
+        )
     }
 
     /**
@@ -109,6 +127,23 @@ class AppInventory(private val context: Context) {
             generatedAt = System.currentTimeMillis(),
             report = report,
         )
+    }
+
+    private suspend fun generateReport(appHash: String): CachedReport {
+        Log.d(TAG, "Generating app inventory via backend...")
+        val report = try {
+            generateViaBackend(appHash)
+        } catch (e: Exception) {
+            Log.e(TAG, "Backend inventory failed: ${e.message}, using fallback")
+            CachedReport(
+                appHash = appHash,
+                generatedAt = System.currentTimeMillis(),
+                report = generateFallback(),
+            )
+        }
+        save(report)
+        Log.d(TAG, "App inventory ready (${report.report.length} chars)")
+        return report
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────

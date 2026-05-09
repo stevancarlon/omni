@@ -1,5 +1,6 @@
 package com.omni.assistant.llm
 
+import android.util.Log
 import com.omni.assistant.OmniApplication
 import com.omni.assistant.data.AgentAction
 import com.google.gson.Gson
@@ -67,10 +68,7 @@ class LLMClient(private val app: OmniApplication) {
             }
             // Only include the full app inventory on the first step to save tokens
             if (isFirstStep) {
-                val inventoryPrompt = cachedInventoryPrompt ?: run {
-                    val report = app.appInventory.getOrGenerate()
-                    app.appInventory.formatForPrompt(report).also { cachedInventoryPrompt = it }
-                }
+                val inventoryPrompt = cachedInventoryPrompt ?: loadInventoryPromptFast()
                 appendLine()
                 appendLine(inventoryPrompt)
                 // Include past successful sequences as guidance
@@ -114,6 +112,16 @@ class LLMClient(private val app: OmniApplication) {
         messages.add(mapOf("role" to "user", "content" to userMessage))
 
         return callBackend(backendUrl, authToken, systemPrompt, messages, targetProfile)
+    }
+
+    private suspend fun loadInventoryPromptFast(): String {
+        val startedAt = System.currentTimeMillis()
+        val report = app.appInventory.getCachedOrFallback()
+
+        return app.appInventory.formatForPrompt(report).also {
+            Log.d(TAG, "Loaded app inventory prompt in ${System.currentTimeMillis() - startedAt}ms")
+            cachedInventoryPrompt = it
+        }
     }
 
     private suspend fun callBackend(
@@ -253,6 +261,10 @@ class LLMClient(private val app: OmniApplication) {
         } catch (_: Exception) {
             body.take(500)
         }
+    }
+
+    private companion object {
+        const val TAG = "LLMClient"
     }
 
     // ─── MobileRAG: Action Memory ───────────────────────────────────────────

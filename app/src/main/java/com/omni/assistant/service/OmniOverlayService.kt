@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import android.view.Gravity
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.core.app.NotificationCompat
@@ -231,8 +232,8 @@ class OmniOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 78
-            y = 5
+            x = OVERLAY_START_X_PX
+            y = safeTopOffsetPx()
         }
 
         _visible.value = false
@@ -322,6 +323,24 @@ class OmniOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         removeOverlayView(thenStop = true)
     }
 
+    private fun safeTopOffsetPx(): Int {
+        val statusInsets = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            windowManager
+                ?.currentWindowMetrics
+                ?.windowInsets
+                ?.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars() or WindowInsets.Type.displayCutout())
+                ?.top
+                ?: 0
+        } else {
+            resources.getIdentifier("status_bar_height", "dimen", "android")
+                .takeIf { it > 0 }
+                ?.let { resources.getDimensionPixelSize(it) }
+                ?: 0
+        }
+
+        return statusInsets + OVERLAY_SAFE_TOP_MARGIN_PX
+    }
+
     private fun cancelAgentAndListener() {
         agentController.reset()
         try {
@@ -338,6 +357,8 @@ class OmniOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         private const val NOTIFICATION_ID = 4242
         private const val OVERLAY_ENTER_DURATION_MS = 280
         private const val OVERLAY_EXIT_DURATION_MS = 220
+        private const val OVERLAY_START_X_PX = 78
+        private const val OVERLAY_SAFE_TOP_MARGIN_PX = 10
         private const val TERMINAL_HIDE_DELAY_MS = 3000L
     }
 }

@@ -35,6 +35,11 @@ data class StoreProduct(
     val details: ProductDetails,
 )
 
+class PurchaseVerificationException(
+    userMessage: String,
+    val technicalDetail: String? = null,
+) : IOException(userMessage)
+
 class PlayBillingRepository(
     private val context: Context,
     private val app: OmniApplication,
@@ -196,7 +201,7 @@ class PlayBillingRepository(
         val response = http.newCall(request).execute()
         val responseBody = response.body?.string().orEmpty()
         if (!response.isSuccessful) {
-            throw IOException("Purchase verification failed (${response.code}): ${responseBody.take(200)}")
+            throw purchaseVerificationError(response.code, responseBody)
         }
         val json = gson.fromJson(responseBody, JsonObject::class.java)
         val subscription = json.getAsJsonObject("subscription")
@@ -204,6 +209,30 @@ class PlayBillingRepository(
             status = subscription?.get("status")?.asString ?: "inactive",
             plan = subscription?.get("plan")?.asString ?: "free",
         )
+    }
+
+    private fun purchaseVerificationError(responseCode: Int, responseBody: String): IOException {
+        val detail = runCatching {
+            gson.fromJson(responseBody, JsonObject::class.java)
+                ?.get("detail")
+                ?.asString
+        }.getOrNull()
+        val technicalDetail = detail ?: responseBody.take(300)
+
+        val message = when {
+            responseCode in listOf(401, 403) ||
+                technicalDetail.contains("insufficient", ignoreCase = true) ||
+                technicalDetail.contains("androidpublisher", ignoreCase = true) ->
+                "Payment completed, but Omni could not verify it with Google Play yet. Please try Restore purchase after the billing setup is fixed."
+
+            responseCode >= 500 ->
+                "Payment completed, but Omni's server could not verify it right now. Please try Restore purchase in a few minutes."
+
+            else ->
+                "Payment completed, but Omni could not verify it. Please try Restore purchase."
+        }
+
+        return PurchaseVerificationException(message, technicalDetail)
     }
 
     private suspend fun acknowledgeIfNeeded(purchase: Purchase) {

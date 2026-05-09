@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
@@ -48,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omni.assistant.OmniApplication
 import com.omni.assistant.billing.PlayBillingRepository
+import com.omni.assistant.billing.PurchaseVerificationException
 import com.omni.assistant.billing.StoreProduct
 import com.omni.assistant.ui.theme.OmniColors
 import com.omni.assistant.ui.theme.OmniGradients
@@ -68,12 +70,12 @@ fun PaywallScreen(onBack: () -> Unit) {
     var selectedPlan by remember { mutableStateOf(SubscriptionPlan.Pro) }
     var products by remember { mutableStateOf<List<StoreProduct>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var errorDialog by remember { mutableStateOf<PaymentError?>(null) }
 
     LaunchedEffect(Unit) {
         runCatching { billingRepository.products(SubscriptionPlan.entries.map { it.productId }) }
             .onSuccess { products = it }
-            .onFailure { error = it.message }
+            .onFailure { errorDialog = it.toPaymentError() }
     }
 
     Box(
@@ -157,16 +159,22 @@ fun PaywallScreen(onBack: () -> Unit) {
                 onClick = {
                     val selectedProduct = products.firstOrNull { it.productId == selectedPlan.productId }
                     if (activity == null) {
-                        error = "Purchase unavailable from this screen"
+                        errorDialog = PaymentError(
+                            title = "Purchase unavailable",
+                            message = "Please reopen this screen and try again.",
+                        )
                     } else if (selectedProduct == null) {
-                        error = "Subscription product is not available yet"
+                        errorDialog = PaymentError(
+                            title = "Plan unavailable",
+                            message = "This subscription is not available from Google Play yet.",
+                        )
                     } else {
                         scope.launch {
                             loading = true
-                            error = null
+                            errorDialog = null
                             runCatching { billingRepository.purchase(activity, selectedProduct) }
                                 .onSuccess { onBack() }
-                                .onFailure { error = it.message }
+                                .onFailure { errorDialog = it.toPaymentError() }
                             loading = false
                         }
                     }
@@ -183,28 +191,90 @@ fun PaywallScreen(onBack: () -> Unit) {
                     .clickable {
                         scope.launch {
                             loading = true
-                            error = null
+                            errorDialog = null
                             runCatching { billingRepository.restore() }
                                 .onSuccess { onBack() }
-                                .onFailure { error = it.message }
+                                .onFailure { errorDialog = it.toPaymentError() }
                             loading = false
                         }
                     },
             )
-            if (error != null) {
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    error.orEmpty(),
-                    color = OmniColors.Error,
-                    fontSize = 12.sp,
-                    lineHeight = 16.sp,
-                    fontWeight = FontWeight.Light,
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
-                )
-            }
             Spacer(Modifier.height(28.dp))
         }
+
+        errorDialog?.let { error ->
+            PaymentErrorDialog(
+                error = error,
+                onDismiss = { errorDialog = null },
+            )
+        }
     }
+}
+
+private data class PaymentError(
+    val title: String,
+    val message: String,
+)
+
+private fun Throwable.toPaymentError(): PaymentError {
+    val message = message.orEmpty()
+
+    return when {
+        this is PurchaseVerificationException -> PaymentError(
+            title = "Payment verification issue",
+            message = message.ifBlank {
+                "Payment completed, but Omni could not verify it. Please try Restore purchase."
+            },
+        )
+
+        message.contains("cancel", ignoreCase = true) -> PaymentError(
+            title = "Purchase cancelled",
+            message = "No changes were made to your plan.",
+        )
+
+        message.contains("No active subscription", ignoreCase = true) -> PaymentError(
+            title = "No subscription found",
+            message = "Google Play did not return an active Omni subscription for this account.",
+        )
+
+        else -> PaymentError(
+            title = "Payment unavailable",
+            message = message.takeIf { it.isNotBlank() }
+                ?: "Google Play could not complete this request. Please try again.",
+        )
+    }
+}
+
+@Composable
+private fun PaymentErrorDialog(
+    error: PaymentError,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF101114),
+        title = {
+            Text(error.title, color = OmniColors.Ink, fontWeight = FontWeight.SemiBold)
+        },
+        text = {
+            Text(
+                error.message,
+                color = OmniColors.InkMute,
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+            )
+        },
+        confirmButton = {
+            Text(
+                "Done",
+                color = OmniColors.BrandBlueGlow,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .clickable { onDismiss() }
+                    .padding(12.dp),
+            )
+        },
+    )
 }
 
 private enum class SubscriptionPlan(

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Omni</string>
+    <string name="accessibility_service_label">Omni AI Assistant</string>
+    <string name="accessibility_service_description">Omni uses accessibility services to read your screen and perform actions to fulfill your voice commands.</string>
+    <!-- Replace with the OAuth 2.0 Web client ID from Google Cloud/Firebase before release. -->
+    <string name="google_web_client_id">181428146302-f6f8asbkeeltgq7t6k09al301t9sag8q.apps.googleusercontent.com</string>
+    <string name="google_play_pro_product_id">omni_pro_monthly</string>
+    <string name="google_play_unlimited_product_id">omni_unlimited_monthly</string>
+</resources>

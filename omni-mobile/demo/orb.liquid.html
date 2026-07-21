@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Omni Orb — plasma</title>
+<style>
+  * { margin: 0; padding: 0; }
+  body { background: #050508; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2');
+const size = Math.min(window.innerWidth, window.innerHeight) * 0.7;
+canvas.width  = size * devicePixelRatio;
+canvas.height = size * devicePixelRatio;
+canvas.style.width  = size + 'px';
+canvas.style.height = size + 'px';
+
+const vs = `#version 300 es
+in vec2 a_pos;
+out vec2 v_uv;
+void main() { v_uv = a_pos*0.5+0.5; gl_Position = vec4(a_pos,0,1); }`;
+
+const fs = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 fragColor;
+uniform float u_time;
+
+// ─── hash / noise ───
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f*f*(3.0-2.0*f);
+  return mix(mix(hash(i+vec2(0,0)), hash(i+vec2(1,0)), u.x),
+             mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), u.x), u.y);
+}
+float fbm2(vec2 p) {
+  float v = 0.0, a = 0.5;
+  for (int i=0; i<2; i++){ v += a*noise(p); p *= 2.03; a *= 0.5; }
+  return v;
+}
+float fbm3(vec2 p) {
+  float v = 0.0, a = 0.5;
+  for (int i=0; i<3; i++){ v += a*noise(p); p *= 2.03; a *= 0.5; }
+  return v;
+}
+
+// ─── palette (linear space, from analysis) ───
+// #05070E bg, #0E1C3A deep fill, #2F5FB8 mid, #6CB8FF bright cyan,
+// #C8E8FF ray/white, #F4FCFF hot core, #7FC0FF rim edge, #1B3E8A halo tint
+vec3 cBg      = vec3(0.020, 0.027, 0.055);
+vec3 cDeep    = vec3(0.055, 0.110, 0.227);
+vec3 cMid     = vec3(0.184, 0.373, 0.721);
+vec3 cBright  = vec3(0.423, 0.721, 1.000);
+vec3 cRay     = vec3(0.784, 0.910, 1.000);
+vec3 cHot     = vec3(0.957, 0.988, 1.000);
+vec3 cRim     = vec3(0.498, 0.753, 1.000);
+vec3 cHalo    = vec3(0.106, 0.243, 0.541);
+
+// Domain-warped fbm — soft wispy plasma interior
+float wisps(vec2 p, float t) {
+  vec2 q = vec2(fbm2(p + vec2(0.0, t*0.07)),
+                fbm2(p + vec2(5.2, t*0.08 + 1.3)));
+  vec2 r = vec2(fbm2(p + 4.0*q + vec2(1.7, t*0.05)),
+                fbm2(p + 4.0*q + vec2(8.3, t*0.06 + 3.1)));
+  return fbm3(p + 4.0*r);
+}
+
+// Float N pinpoint lights inside the orb. Each drifts on its own slow orbit.
+// Returns accumulated bright contribution in (hot core + tight bloom) form.
+vec3 pinpoints(vec2 p, float t) {
+  vec3 acc = vec3(0.0);
+  const int N = 7;
+  for (int i = 0; i < N; i++) {
+    float fi = float(i);
+    // Pseudo-random orbital parameters per light
+    float r1 = 0.18 + 0.55 * fract(fi * 0.317);
+    float r2 = 0.12 + 0.30 * fract(fi * 0.719 + 0.3);
+    float w1 = 0.18 + 0.22 * fract(fi * 0.131);
+    float w2 = 0.23 + 0.31 * fract(fi * 0.583 + 0.7);
+    float ph1 = fi * 1.37;
+    float ph2 = fi * 2.11;
+
+    vec2 pos = vec2(
+      cos(t*w1 + ph1) * r1 + cos(t*w2 + ph2) * r2 * 0.5,
+      sin(t*w1*1.1 + ph1) * r1 + sin(t*w2 + ph2) * r2 * 0.5
+    );
+
+    float d2 = dot(p - pos, p - pos);
+
+    // Size/brightness jitter — some pinpoints slightly bigger / pulse
+    float puls = 0.75 + 0.25 * sin(t * (1.1 + fi*0.37) + fi);
+    float hot  = exp(-d2 * 1400.0) * 1.6 * puls;      // tight hot pixel
+    float blm  = exp(-d2 * 200.0)  * 0.55 * puls;     // small bloom
+    float halo = exp(-d2 * 35.0)   * 0.18 * puls;     // very soft halo
+
+    acc += vec3(0.96, 0.99, 1.0) * hot
+         + vec3(0.78, 0.92, 1.0) * blm
+         + vec3(0.42, 0.72, 1.0) * halo;
+  }
+  return acc;
+}
+
+void main() {
+  vec2 uv = v_uv * 2.0 - 1.0;
+  float dist = length(uv);
+  float t = u_time;
+
+  vec3 color = cBg;
+
+  // ─── Sphere geometry ───
+  float sR = 0.60;
+  float sMask = smoothstep(sR+0.003, sR-0.003, dist);
+  vec2 sp = uv / sR;
+  float sd = length(sp);
+  float sz = sqrt(max(0.0, 1.0 - sd*sd));
+  vec3 N = vec3(sp, sz);
+
+  // ─── Liquid glass: perturb the surface normal with animated noise ───
+  // This makes the refraction wobble like a fluid lens — content shifts and
+  // swims slightly as the noise field flows across the sphere.
+  vec2 nwp = sp * 3.5;
+  vec2 nwarp = vec2(
+      fbm2(nwp + vec2( 0.0,  t*0.32)) - 0.5,
+      fbm2(nwp + vec2( 7.3, -t*0.27)) - 0.5
+  );
+  // Second octave of flow for organic motion
+  nwarp += 0.5 * vec2(
+      fbm2(nwp*2.2 + vec2( 3.1,  t*0.21)) - 0.5,
+      fbm2(nwp*2.2 + vec2(-2.7, -t*0.19)) - 0.5
+  );
+  // Apply perturbation: scaled so it's a gentle liquid wobble, not chaos
+  vec3 Nlq = normalize(N + vec3(nwarp * 0.35, 0.0));
+
+  // ─── Refraction through the liquid glass ───
+  vec3 viewDir = vec3(0.0, 0.0, -1.0);
+  vec3 Rr = refract(viewDir, Nlq, 1.0/1.42);
+  float backDepth = 0.55;
+  vec2 spRaw = sp + Rr.xy * (backDepth / max(-Rr.z, 0.30));
+  vec2 spC   = spRaw * 0.85;
+  float rC = length(spC);
+
+  // ─── Interior wisps (domain-warped fbm, low freq) ───
+  vec2 wp = spC * 3.2 + vec2(t*0.05, -t*0.04);
+  float w = wisps(wp, t);               // roughly 0..1
+  // Remap so wisps are gently lit across the sphere, brightening where noise is high
+  float wispBright = smoothstep(0.35, 0.80, w);
+
+  // Base interior fill: deep blue near rim, lit mid
+  vec3 interior = cDeep * 1.4;
+  interior += cMid    * wispBright * 0.95;
+  interior += cBright * pow(wispBright, 2.0) * 0.70;
+  // Extra soft fill from distance-to-center so sphere reads as lit volume
+  interior += mix(cMid, cBright, 0.3) * (1.0 - smoothstep(0.0, 1.1, rC)) * 0.35;
+  // Base secondary wisp field at higher frequency for finer detail
+  float w2 = fbm3(spC * 6.5 + vec2(t*0.08, -t*0.06));
+  interior += cBright * smoothstep(0.5, 0.85, w2) * 0.25;
+
+  // ─── Floating pinpoint lights ───
+  // Multiple bright spots drifting through the refracted interior space.
+  interior += pinpoints(spC, t);
+
+  // ─── Volume thickness (gentle rim dimming from inside) ───
+  interior *= mix(0.65, 1.0, pow(sz, 0.55));
+
+  // ─── Glass surface shading ───
+  // Dark refraction band just inside the rim
+  float rimBand = smoothstep(0.88, 1.0, sd);
+  interior *= 1.0 - rimBand * 0.45;
+
+  // Thin bright edge highlight (rim light) — softer, not a drawn circle
+  float edge = smoothstep(0.955, 0.99, sd) * (1.0 - smoothstep(0.985, 1.005, sd));
+  interior += cRim * edge * 0.55;
+
+  // Soft fresnel tint pulling from interior brightness
+  float fres = pow(1.0 - sz, 3.0);
+  float bInt = dot(interior, vec3(0.33));
+  interior += cRim * fres * (0.15 + bInt*0.4);
+
+  // Subtle volume shading — contact darkening bottom-right
+  vec3 Lshade = normalize(vec3(0.35, -0.55, 0.4));
+  float shade = pow(max(0.0, dot(N, Lshade)), 2.0);
+  interior *= mix(1.0, 0.82, shade * 0.45);
+
+  // ─── Surface sparkles (on the glass itself, not refracted) ───
+  // Use sphere-surface 2D coord (sp) so sparkles sit on the shell.
+  // Hash-thresholded points that twinkle via sin(time+phase).
+  float sparkle = 0.0;
+  for (int i = 0; i < 3; i++) {
+    float fi = float(i);
+    vec2 cell = sp * (5.0 + fi*3.0);
+    vec2 ci = floor(cell);
+    vec2 cf = fract(cell) - 0.5;
+    float h = hash(ci + fi*37.0);
+    if (h > 0.94) {
+      vec2 off = vec2(hash(ci+vec2(1.0,0.0))-0.5, hash(ci+vec2(0.0,1.0))-0.5) * 0.6;
+      float d = length(cf - off);
+      float tw = 0.5 + 0.5 * sin(t*(1.5 + h*3.0) + h*20.0);
+      sparkle += exp(-d*d * 900.0) * tw;
+    }
+  }
+  // Sparkles only visible on the front-facing glass (fade at rim)
+  interior += vec3(1.0) * sparkle * smoothstep(0.1, 0.55, sz) * 0.9;
+
+  // Sharp specular highlight from upper-left
+  vec3 L1 = normalize(vec3(-0.45, 0.55, 0.75));
+  float spec1 = pow(max(0.0, dot(N, L1)), 52.0);
+  interior += vec3(1.0) * spec1 * 1.0;
+
+  // ─── Compose ───
+  color = mix(color, interior, sMask);
+
+  // ─── Subtle outer halo (only a few px of bleed) ───
+  float haloD = max(0.0, dist - sR);
+  float halo  = exp(-haloD * 22.0);
+  color += cHalo * halo * 0.55 * (1.0 - sMask);
+
+
+  // Gentle vignette
+  color *= 1.0 - smoothstep(0.85, 1.35, dist) * 0.4;
+
+  fragColor = vec4(color, 1.0);
+}`;
+
+function createShader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.error(gl.getShaderInfoLog(s)); return null; }
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, createShader(gl.VERTEX_SHADER, vs));
+gl.attachShader(prog, createShader(gl.FRAGMENT_SHADER, fs));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(prog, 'a_pos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+const uTime = gl.getUniformLocation(prog, 'u_time');
+function render(time) {
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.uniform1f(uTime, time * 0.001);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

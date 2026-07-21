@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Setup discussion
+    url: https://github.com/stevancarlon/omni/discussions
+    about: Ask for help installing or configuring Omni.
+  - name: Security vulnerability
+    url: https://github.com/stevancarlon/omni/security/advisories/new
+    about: Report vulnerabilities privately.

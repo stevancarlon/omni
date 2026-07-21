@@ -1,51 +1,35 @@
-# Omni
+# Omni Android
 
-Omni is an experimental open-source Android agent that can see the screen and
-operate the phone through Android's Accessibility API. Give it a goal and it can
-tap, type, swipe, navigate, open apps, and adapt as the screen changes.
+The native Android client for the [Omni monorepo](..). It observes Android UI
+through an Accessibility service, sends bounded screen context to the
+self-hosted backend, validates the returned action, and executes it.
 
-## Demo
+Follow the complete [installation guide](../README.md) to configure API keys,
+start the backend, install the community build, and enable Android permissions.
 
-<!-- Add the demo video here. GitHub supports an uploaded video URL on its own line. -->
-
-_Demo video coming soon._
-
-## Run it
-
-You need Android 10+, Android Studio, and a running
-[Omni backend](https://github.com/stevancarlon/omni-backend) configured with
-`COMMUNITY_MODE=true`.
+## Community build
 
 ```bash
-adb reverse tcp:4000 tcp:4000
 cp local.properties.example local.properties
-./gradlew assembleCommunityDebug
-adb install -r app/build/outputs/apk/community/debug/app-community-debug.apk
+./gradlew installCommunityDebug
 ```
 
-Open Omni and choose **Connect to community backend**. On Android 13+, you must
-also open Omni's App Info screen and select **Allow restricted settings** before
-enabling its Accessibility service.
+With `adb reverse tcp:4000 tcp:4000`, the default backend URL is
+`http://127.0.0.1:4000`. For a remote server, set
+`OMNI_COMMUNITY_BACKEND_URL=https://your-backend.example` in
+`local.properties`.
 
-The community flavor is self-hosted, contains no store billing integration, and
-does not require Google sign-in.
+The community flavor has package ID `com.omni.orb.community`, no store billing,
+and no Google sign-in requirement.
 
-> [!WARNING]
-> Omni can read screen content and interact with other apps. Only install builds
-> you trust. Do not use it to automate passwords, banking, payments, or
-> authentication challenges. This project is alpha software and is not currently
-> distributed through Google Play.
+## Checks
 
-## Project docs
+```bash
+./gradlew lintCommunityDebug
+./gradlew testCommunityDebugUnitTest
+./gradlew assembleCommunityDebug
+```
 
-- [Architecture](ARCHITECTURE.md)
-- [Privacy model](PRIVACY.md)
-- [Roadmap](ROADMAP.md)
-- [Contributing](CONTRIBUTING.md)
-- [Security](SECURITY.md)
-- [Releasing](RELEASING.md)
-
-## License
-
-Apache License 2.0. The Omni name, wordmark, and logo may not be used to imply
-that an unofficial build is operated or endorsed by the project.
+See [ARCHITECTURE.md](ARCHITECTURE.md), [PRIVACY.md](PRIVACY.md), and the root
+[contribution guide](../CONTRIBUTING.md). The project is licensed under the root
+[Apache License 2.0](../LICENSE).

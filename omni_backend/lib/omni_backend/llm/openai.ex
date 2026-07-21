@@ -4,6 +4,7 @@ defmodule OmniBackend.LLM.OpenAI do
 
   @default_model "gpt-5.5"
 
+  @impl true
   def default_model, do: @default_model
 
   @impl true

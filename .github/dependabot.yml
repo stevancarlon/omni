@@ -1,0 +1,12 @@
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /omni-mobile
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: mix
+    directory: /omni_backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

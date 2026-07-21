@@ -8,6 +8,7 @@ defmodule OmniBackend.LLM.Gemini do
 
   require Logger
 
+  @impl true
   def default_model, do: @default_model
 
   @impl true

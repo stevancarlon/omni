@@ -1,7 +1,5 @@
 import Config
 
-import_config "env_loader.exs"
-
 # config/runtime.exs is executed for all environments, including
 # during releases. It is executed after compilation and before the
 # system starts, so it is typically used to load production configuration
@@ -22,8 +20,10 @@ if System.get_env("PHX_SERVER") do
   config :omni_backend, OmniBackendWeb.Endpoint, server: true
 end
 
+default_port = if config_env() == :prod, do: "10000", else: "4000"
+
 config :omni_backend, OmniBackendWeb.Endpoint,
-  http: [port: String.to_integer(System.get_env("PORT", "10000"))]
+  http: [port: String.to_integer(System.get_env("PORT", default_port))]
 
 # API keys — set via environment variables
 config :omni_backend,

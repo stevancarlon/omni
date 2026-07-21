@@ -39,4 +39,4 @@ Community builds use `com.omni.orb.community` so they can coexist with an offici
 4. The model's response is untrusted input and is parsed into a limited `AgentAction` schema.
 5. Local validation, sensitive-app suspension, duplicate detection, and step limits reduce risk but cannot make arbitrary UI automation safe.
 
-See [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md) for operational requirements.
+See [PRIVACY.md](PRIVACY.md) and the root [SECURITY.md](../SECURITY.md) for operational requirements.

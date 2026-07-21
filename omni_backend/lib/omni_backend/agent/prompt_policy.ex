@@ -20,7 +20,9 @@ defmodule OmniBackend.Agent.PromptPolicy do
   - When the goal is visibly accomplished, return done(success=true) immediately.
   """
 
-  def append(system, opts \\ []) when is_binary(system) do
+  def append(system, opts \\ [])
+
+  def append(system, opts) when is_binary(system) do
     system
     |> append_once("═══ NEXT ACTION PRIORITY ═══", @policy)
     |> append_app_profile(opts[:app_profile])

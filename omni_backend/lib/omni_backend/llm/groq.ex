@@ -4,6 +4,7 @@ defmodule OmniBackend.LLM.Groq do
 
   @default_model "llama-3.3-70b-versatile"
 
+  @impl true
   def default_model, do: @default_model
 
   @impl true

@@ -7,6 +7,7 @@ defmodule OmniBackend.LLM.Claude do
   # Higher = deeper analysis on complex screens, but slower.
   @thinking_budget 10_000
 
+  @impl true
   def default_model, do: @default_model
 
   @impl true

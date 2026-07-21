@@ -1,22 +1,33 @@
 name: Bug report
-description: Report a reproducible Omni Android problem using sanitized data.
+description: Report a reproducible Android or backend problem using sanitized data.
 title: "[Bug]: "
 labels: [bug]
 body:
   - type: markdown
     attributes:
       value: Do not include secrets, private screenshots, messages, contacts, tokens, or security vulnerabilities.
-  - type: input
-    id: version
+  - type: dropdown
+    id: component
     attributes:
-      label: Omni version or commit
+      label: Component
+      options:
+        - Android app
+        - Backend
+        - Setup or documentation
+        - Both app and backend
     validations:
       required: true
   - type: input
-    id: device
+    id: version
     attributes:
-      label: Device and Android version
-      placeholder: Pixel 8, Android 16
+      label: Omni commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Device, Android version, operating system, and relevant tool versions.
     validations:
       required: true
   - type: textarea

@@ -24,6 +24,20 @@ defmodule OmniBackendWeb.BillingController do
     end
   end
 
+  def verify_aptoide(conn, params) do
+    user = conn.assigns.current_user
+
+    case Billing.verify_aptoide_purchase(user, params) do
+      {:ok, sub} ->
+        json(conn, %{subscription: Billing.subscription_payload(sub)})
+
+      {:error, reason} ->
+        conn
+        |> put_status(:bad_request)
+        |> json(%{error: "purchase_verification_failed", detail: inspect(reason)})
+    end
+  end
+
   def restore_google(conn, _params) do
     user = conn.assigns.current_user
     sub = Billing.get_subscription(user)

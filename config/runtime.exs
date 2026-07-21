@@ -1,5 +1,7 @@
 import Config
 
+import_config "env_loader.exs"
+
 # config/runtime.exs is executed for all environments, including
 # during releases. It is executed after compilation and before the
 # system starts, so it is typically used to load production configuration
@@ -25,6 +27,7 @@ config :omni_backend, OmniBackendWeb.Endpoint,
 
 # API keys — set via environment variables
 config :omni_backend,
+  community_mode: System.get_env("COMMUNITY_MODE", "false") in ~w(true 1),
   anthropic_api_key: System.get_env("ANTHROPIC_API_KEY"),
   openai_api_key: System.get_env("OPENAI_API_KEY"),
   openrouter_api_key: System.get_env("OPENROUTER_API_KEY"),
@@ -41,6 +44,12 @@ config :omni_backend,
   google_play_service_account_json:
     System.get_env("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON") ||
       System.get_env("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_B64"),
+  aptoide_package_name:
+    System.get_env("APTOIDE_PACKAGE_NAME") || System.get_env("GOOGLE_PLAY_PACKAGE_NAME"),
+  aptoide_pro_product_id: System.get_env("APTOIDE_PRO_PRODUCT_ID", "omni_pro_monthly"),
+  aptoide_unlimited_product_id:
+    System.get_env("APTOIDE_UNLIMITED_PRODUCT_ID", "omni_unlimited_monthly"),
+  aptoide_api_key: System.get_env("APTOIDE_API_KEY"),
   stripe_webhook_secret: System.get_env("STRIPE_WEBHOOK_SECRET")
 
 config :stripity_stripe,

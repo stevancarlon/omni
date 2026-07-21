@@ -19,18 +19,9 @@ defmodule OmniBackend.Accounts.ApiToken do
 
   def changeset(api_token, attrs) do
     api_token
-    |> cast(attrs, [:device_name, :user_id])
-    |> validate_required([:user_id])
-    |> put_token()
+    |> cast(attrs, [:device_name, :user_id, :token])
+    |> validate_required([:user_id, :token])
     |> put_expiry()
-  end
-
-  defp put_token(changeset) do
-    put_change(
-      changeset,
-      :token,
-      :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
-    )
   end
 
   defp put_expiry(changeset) do

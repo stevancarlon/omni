@@ -26,7 +26,14 @@ erl_crash.dump
 .env
 .env.*
 !.env.example
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+*.sql
+*.dump
+*.sqlite
 
 # Ignore package tarball (built via "mix hex.build").
 omni_backend-*.tar
-

@@ -60,6 +60,30 @@ defmodule OmniBackendWeb.AuthController do
     end
   end
 
+  def community(conn, params) do
+    if Application.get_env(:omni_backend, :community_mode, false) do
+      identifier = Ecto.UUID.generate()
+
+      attrs = %{
+        "email" => "community-#{identifier}@local.omni",
+        "name" => "Community user",
+        "password" => Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
+      }
+
+      with {:ok, user} <- Accounts.register_user(attrs),
+           {:ok, token} <- Accounts.create_api_token(user, params["device_name"]),
+           {:ok, sub} <- Billing.get_or_create_subscription(user) do
+        conn
+        |> put_status(:created)
+        |> json(session_payload(user, token, sub))
+      end
+    else
+      conn
+      |> put_status(:not_found)
+      |> json(%{error: "community_mode_disabled"})
+    end
+  end
+
   def me(conn, _params) do
     user = conn.assigns.current_user
     sub = Billing.get_subscription(user)

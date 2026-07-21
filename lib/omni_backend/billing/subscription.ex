@@ -12,6 +12,10 @@ defmodule OmniBackend.Billing.Subscription do
     field :google_product_id, :string
     field :google_purchase_token, :string
     field :google_order_id, :string
+    field :aptoide_package_name, :string
+    field :aptoide_product_id, :string
+    field :aptoide_purchase_token, :string
+    field :aptoide_order_id, :string
     field :plan, :string, default: "free"
     field :status, :string, default: "active"
     field :current_period_end, :utc_datetime
@@ -30,6 +34,10 @@ defmodule OmniBackend.Billing.Subscription do
       :google_product_id,
       :google_purchase_token,
       :google_order_id,
+      :aptoide_package_name,
+      :aptoide_product_id,
+      :aptoide_purchase_token,
+      :aptoide_order_id,
       :plan,
       :status,
       :current_period_end,

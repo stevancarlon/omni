@@ -93,6 +93,7 @@ defmodule OmniBackendWeb.DeepgramController do
   # ("pt-BR", "es-ES"). Strip the region suffix so transcription actually
   # uses the selected language instead of silently falling back to English.
   defp normalize_language("multi"), do: "multi"
+
   defp normalize_language(lang) do
     lang |> String.split(~r"[-_]") |> hd() |> String.downcase()
   end

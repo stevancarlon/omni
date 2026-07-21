@@ -60,17 +60,31 @@ defmodule OmniBackend.Accounts do
   end
 
   def create_api_token(user, device_name \\ nil) do
-    %ApiToken{}
-    |> ApiToken.changeset(%{user_id: user.id, device_name: device_name})
-    |> Repo.insert()
+    token_string = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+
+    result =
+      %ApiToken{}
+      |> ApiToken.changeset(%{
+        user_id: user.id,
+        device_name: device_name,
+        token: token_digest(token_string)
+      })
+      |> Repo.insert()
+
+    case result do
+      {:ok, stored_token} -> {:ok, %{stored_token | token: token_string}}
+      error -> error
+    end
   end
 
   def verify_api_token(token_string) do
     now = DateTime.utc_now()
 
+    accepted_tokens = [token_digest(token_string), token_string]
+
     query =
       from t in ApiToken,
-        where: t.token == ^token_string,
+        where: t.token in ^accepted_tokens,
         where: is_nil(t.revoked_at),
         where: t.expires_at > ^now,
         preload: [:user]
@@ -89,9 +103,11 @@ defmodule OmniBackend.Accounts do
   end
 
   def revoke_api_token(token_string, user) do
+    accepted_tokens = [token_digest(token_string), token_string]
+
     query =
       from t in ApiToken,
-        where: t.token == ^token_string,
+        where: t.token in ^accepted_tokens,
         where: t.user_id == ^user.id,
         where: is_nil(t.revoked_at)
 
@@ -107,6 +123,10 @@ defmodule OmniBackend.Accounts do
   end
 
   def get_user!(id), do: Repo.get!(User, id)
+
+  defp token_digest(token_string) do
+    :crypto.hash(:sha256, token_string) |> Base.encode16(case: :lower)
+  end
 
   def user_payload(user) do
     %{

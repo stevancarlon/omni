@@ -45,7 +45,8 @@ defmodule OmniBackendWeb.WhisperController do
       {"model", "whisper-1"},
       {"response_format", "verbose_json"},
       {"temperature", "0.0"},
-      {"prompt", "This is a voice command from a mobile assistant user. Common commands include opening apps, sending messages, making calls, playing music, and navigation."}
+      {"prompt",
+       "This is a voice command from a mobile assistant user. Common commands include opening apps, sending messages, making calls, playing music, and navigation."}
     ]
 
     # Add language hint if provided (improves accuracy)

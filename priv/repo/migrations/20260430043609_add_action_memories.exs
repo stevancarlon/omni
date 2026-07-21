@@ -18,6 +18,7 @@ defmodule OmniBackend.Repo.Migrations.AddActionMemories do
     end
 
     create index(:action_memories, [:user_id])
+
     execute "CREATE INDEX idx_action_memories_goal_trgm ON action_memories USING GIN (goal_text gin_trgm_ops)"
   end
 end

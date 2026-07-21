@@ -21,6 +21,7 @@ defmodule OmniBackendWeb.Router do
     post "/auth/register", AuthController, :register
     post "/auth/login", AuthController, :login
     post "/auth/google", AuthController, :google
+    post "/auth/community", AuthController, :community
 
     # Stripe webhook (no auth — verified via signature)
     post "/billing/webhook", BillingController, :webhook
@@ -40,6 +41,7 @@ defmodule OmniBackendWeb.Router do
     get "/billing/status", BillingController, :status
     post "/billing/google/verify", BillingController, :verify_google
     post "/billing/google/restore", BillingController, :restore_google
+    post "/billing/aptoide/verify", BillingController, :verify_aptoide
   end
 
   # Paid entitlement routes

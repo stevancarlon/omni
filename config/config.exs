@@ -7,37 +7,7 @@
 # General application configuration
 import Config
 
-if File.exists?(".env") do
-  ".env"
-  |> File.stream!()
-  |> Stream.map(&String.trim/1)
-  |> Enum.each(fn
-    "" ->
-      :ok
-
-    "#" <> _comment ->
-      :ok
-
-    line ->
-      line = String.replace_prefix(line, "export ", "")
-
-      case String.split(line, "=", parts: 2) do
-        [key, value] ->
-          value =
-            value
-            |> String.trim()
-            |> String.trim("\"")
-            |> String.trim("'")
-
-          if System.get_env(key) == nil do
-            System.put_env(key, value)
-          end
-
-        _ ->
-          :ok
-      end
-  end)
-end
+import_config "env_loader.exs"
 
 config :omni_backend,
   ecto_repos: [OmniBackend.Repo],

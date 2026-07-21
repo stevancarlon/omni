@@ -16,6 +16,7 @@ import android.util.Log
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.Toast
 import com.omni.assistant.data.ActionResult
 import com.omni.assistant.data.AgentAction
 import com.omni.assistant.data.Rect
@@ -35,14 +36,26 @@ class OmniAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         instance = this
+        bankingProtectionActive.value = false
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            val pkg = event.packageName?.toString() ?: return
-            if (pkg == "com.android.systemui") return
-            foregroundPackage.value = pkg
-            suspended.value = SensitiveAppGuard.isSensitive(pkg)
+        event ?: return
+        if (!isForegroundTransitionEvent(event.eventType)) return
+
+        val pkg = resolveForegroundPackage(event) ?: return
+        if (pkg == "com.android.systemui") return
+
+        foregroundPackage.value = pkg
+        val sensitive = SensitiveAppGuard.isSensitive(pkg)
+        suspended.value = sensitive
+        if (sensitive) {
+            disableForSensitiveApp(pkg)
+            return
+        }
+
+        if (SensitiveAppGuard.isLauncher(pkg) && launcherShowsSensitiveApp()) {
+            disableForSensitiveApp("$pkg launcher target")
         }
     }
 
@@ -51,6 +64,69 @@ class OmniAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         instance = null
+    }
+
+    private fun disableForSensitiveApp(packageName: String) {
+        if (bankingProtectionActive.value) return
+        bankingProtectionActive.value = true
+        Log.i(TAG, "Disabling Omni accessibility service while sensitive app is foreground: $packageName")
+        disableForBankingMode()
+    }
+
+    private fun disableForBankingMode() {
+        bankingProtectionActive.value = true
+        Toast.makeText(
+            this,
+            "Omni disabled for banking app security. Re-enable it after banking.",
+            Toast.LENGTH_LONG,
+        ).show()
+        disableSelf()
+    }
+
+    private fun isForegroundTransitionEvent(eventType: Int): Boolean {
+        return eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+            eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED ||
+            eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+    }
+
+    private fun resolveForegroundPackage(event: AccessibilityEvent): String? {
+        val eventPackage = event.packageName?.toString()
+        if (!eventPackage.isNullOrBlank()) return eventPackage
+
+        val root = rootInActiveWindow ?: return null
+        return try {
+            root.packageName?.toString()
+        } finally {
+            root.recycle()
+        }
+    }
+
+    private fun launcherShowsSensitiveApp(): Boolean {
+        val root = rootInActiveWindow ?: return false
+        return try {
+            containsSensitiveLauncherLabel(root)
+        } finally {
+            root.recycle()
+        }
+    }
+
+    private fun containsSensitiveLauncherLabel(node: AccessibilityNodeInfo, depth: Int = 0): Boolean {
+        if (depth > 8) return false
+
+        val labels = sequenceOf(node.text, node.contentDescription)
+            .mapNotNull { it?.toString() }
+        if (labels.any { SensitiveAppGuard.isSensitiveLabel(it) }) return true
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            val found = try {
+                containsSensitiveLauncherLabel(child, depth + 1)
+            } finally {
+                child.recycle()
+            }
+            if (found) return true
+        }
+        return false
     }
 
     // ─── Screen Perception ──────────────────────────────────────────────────
@@ -764,6 +840,7 @@ class OmniAccessibilityService : AccessibilityService() {
         var instance: OmniAccessibilityService? = null
         val foregroundPackage = MutableStateFlow("")
         val suspended = MutableStateFlow(false)
+        val bankingProtectionActive = MutableStateFlow(false)
     }
 
     private fun openUrl(url: String): Boolean {

@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omni.assistant.OmniApplication
+import com.omni.assistant.BuildConfig
 import androidx.compose.ui.text.TextStyle
 import com.omni.assistant.auth.GoogleSignInClient
 import com.omni.assistant.auth.UnauthorizedException
@@ -39,6 +40,8 @@ import com.omni.assistant.ui.screens.PaywallScreen
 import com.omni.assistant.ui.screens.SettingsScreen
 import com.omni.assistant.ui.screens.SetupScreen
 import com.omni.assistant.ui.screens.WelcomeScreen
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -80,6 +83,28 @@ fun OmniApp(agentController: AgentController) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    LaunchedEffect(Unit) {
+        val activity = context as? MainActivity ?: return@LaunchedEffect
+        combine(
+            app.settingsRepository.authToken,
+            app.settingsRepository.onboardingComplete,
+            app.settingsRepository.subscriptionStatus,
+            app.settingsRepository.subscriptionPlan,
+            app.settingsRepository.wakeWordEnabled,
+        ) { authToken, onboardingComplete, subscriptionStatus, subscriptionPlan, wakeWordEnabled ->
+            WakeServiceState(
+                signedIn = authToken.isNotBlank(),
+                onboardingComplete = onboardingComplete,
+                subscriptionActive = subscriptionStatus == "active" && subscriptionPlan != "free",
+                wakeWordEnabled = wakeWordEnabled,
+            )
+        }
+            .distinctUntilChanged()
+            .collect { state ->
+                if (state.canSyncService) activity.startWakeWordIfReady()
+            }
+    }
+
     if (showAccessibilityDialog) {
         AccessibilitySetupDialog(
             onOpenSettings = {
@@ -119,6 +144,7 @@ fun OmniApp(agentController: AgentController) {
     NavHost(navController = navController, startDestination = start) {
         composable("welcome") {
             WelcomeScreen(
+                communityBuild = BuildConfig.COMMUNITY_BUILD,
                 signingIn = signingIn,
                 errorMessage = signInError,
                 onContinueWithGoogle = {
@@ -146,6 +172,29 @@ fun OmniApp(agentController: AgentController) {
                         }.onFailure { error ->
                             signInError = error.message ?: "Google sign-in failed. Please try again."
                         }
+                        signingIn = false
+                    }
+                },
+                onContinueWithCommunity = {
+                    if (!signingIn) scope.launch {
+                        signingIn = true
+                        signInError = null
+                        runCatching { app.authRepository.signInForCommunity() }
+                            .onSuccess { session ->
+                                app.settingsRepository.setAccountSession(
+                                    authToken = session.authToken,
+                                    email = session.email,
+                                    name = session.name,
+                                    subscriptionStatus = session.subscriptionStatus,
+                                    subscriptionPlan = session.subscriptionPlan,
+                                )
+                                navController.navigate("setup") {
+                                    popUpTo("welcome") { inclusive = true }
+                                }
+                            }
+                            .onFailure { error ->
+                                signInError = error.message ?: "Community sign-in failed."
+                            }
                         signingIn = false
                     }
                 },
@@ -186,6 +235,16 @@ fun OmniApp(agentController: AgentController) {
             PaywallScreen(onBack = { navController.popBackStack() })
         }
     }
+}
+
+private data class WakeServiceState(
+    val signedIn: Boolean,
+    val onboardingComplete: Boolean,
+    val subscriptionActive: Boolean,
+    val wakeWordEnabled: Boolean,
+) {
+    val canSyncService: Boolean
+        get() = signedIn && onboardingComplete && subscriptionActive
 }
 
 @Composable

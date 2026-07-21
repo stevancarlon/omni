@@ -41,6 +41,7 @@ class OmniListenerService : Service() {
     private var speechProvider = "deepgram"
     private var deepgramRequestId = 0
     private var activeDeepgramMode: ListenMode? = null
+    private var activeDeepgramConfig: String? = null
     private var activeCommandId = 0
     private var returnToWakeJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
@@ -139,6 +140,8 @@ class OmniListenerService : Service() {
             speechRecognizer = null
             deepgramClient?.stop()
             deepgramClient = null
+            activeDeepgramMode = null
+            activeDeepgramConfig = null
             return
         }
         if (!useDeepgramForAll) {
@@ -150,6 +153,8 @@ class OmniListenerService : Service() {
             speechRecognizer = null
             deepgramClient?.stop()
             deepgramClient = null
+            activeDeepgramMode = null
+            activeDeepgramConfig = null
             return
         }
         isListeningForWakeWord = true
@@ -174,6 +179,7 @@ class OmniListenerService : Service() {
         deepgramClient?.stop()
         deepgramClient = null
         activeDeepgramMode = null
+        activeDeepgramConfig = null
         speechRecognizer?.destroy()
         speechRecognizer = null
 
@@ -238,6 +244,7 @@ class OmniListenerService : Service() {
         commandRecorder?.stop()
         commandRecorder = null
         activeDeepgramMode = null
+        activeDeepgramConfig = null
         hideOverlay()
         stopSelf()
     }
@@ -262,7 +269,13 @@ class OmniListenerService : Service() {
 
     private fun startOrSwitchDeepgram(mode: ListenMode) {
         val existing = deepgramClient
-        if (mode == activeDeepgramMode && existing != null && existing.isConnected) {
+        val config = deepgramConfig(mode)
+        if (
+            mode == activeDeepgramMode &&
+            config == activeDeepgramConfig &&
+            existing != null &&
+            existing.isConnected
+        ) {
             Log.d(TAG, "Keeping active Deepgram connection for $mode")
             existing.switchMode(mode)
             return
@@ -272,6 +285,7 @@ class OmniListenerService : Service() {
         deepgramClient?.stop()
         deepgramClient = null
         activeDeepgramMode = null
+        activeDeepgramConfig = null
         val requestId = ++deepgramRequestId
 
         scope.launch {
@@ -298,6 +312,7 @@ class OmniListenerService : Service() {
             }
             if (requestId != deepgramRequestId) return@launch
             activeDeepgramMode = mode
+            activeDeepgramConfig = config
 
             deepgramClient = DeepgramClient(
                 websocketUrl = prepareDeepgramUrl(session.url, mode),
@@ -379,6 +394,7 @@ class OmniListenerService : Service() {
                         deepgramClient?.stop()
                         deepgramClient = null
                         activeDeepgramMode = null
+                        activeDeepgramConfig = null
                         if (isListeningForCommand) {
                             Log.d(TAG, "Falling back to built-in recognizer after Deepgram error")
                             startBuiltinRecognizer(wakeWordMode = false)
@@ -685,6 +701,14 @@ class OmniListenerService : Service() {
             "$key=${URLEncoder.encode(value, "UTF-8")}"
         }
         return "$base?$params"
+    }
+
+    private fun deepgramConfig(mode: ListenMode): String {
+        return listOf(
+            mode.name,
+            cachedSpeechLanguage,
+            if (mode == ListenMode.WAKE_WORD) cachedWakeWord else "",
+        ).joinToString("|")
     }
 
     companion object {

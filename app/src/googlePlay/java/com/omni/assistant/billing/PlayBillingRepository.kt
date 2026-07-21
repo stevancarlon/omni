@@ -28,18 +28,6 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 
-data class StoreProduct(
-    val productId: String,
-    val title: String,
-    val formattedPrice: String,
-    val details: ProductDetails,
-)
-
-class PurchaseVerificationException(
-    userMessage: String,
-    val technicalDetail: String? = null,
-) : IOException(userMessage)
-
 class PlayBillingRepository(
     private val context: Context,
     private val app: OmniApplication,
@@ -101,7 +89,9 @@ class PlayBillingRepository(
 
     suspend fun purchase(activity: Activity, product: StoreProduct) {
         ensureConnected()
-        val offerToken = product.details.subscriptionOfferDetails?.firstOrNull()?.offerToken
+        val details = product.details as? ProductDetails
+            ?: throw IOException("Product details unavailable")
+        val offerToken = details.subscriptionOfferDetails?.firstOrNull()?.offerToken
             ?: throw IOException("Subscription offer unavailable")
         val deferred = CompletableDeferred<Result<Purchase>>()
         purchaseResult = deferred
@@ -110,7 +100,7 @@ class PlayBillingRepository(
             .setProductDetailsParamsList(
                 listOf(
                     BillingFlowParams.ProductDetailsParams.newBuilder()
-                        .setProductDetails(product.details)
+                        .setProductDetails(details)
                         .setOfferToken(offerToken)
                         .build()
                 )

@@ -47,6 +47,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omni.assistant.BuildConfig
 import com.omni.assistant.OmniApplication
 import com.omni.assistant.billing.PlayBillingRepository
 import com.omni.assistant.billing.PurchaseVerificationException
@@ -134,18 +135,24 @@ fun PaywallScreen(onBack: () -> Unit) {
             PlanCard(
                 plan = SubscriptionPlan.Pro,
                 selected = selectedPlan == SubscriptionPlan.Pro,
+                displayPrice = products.priceFor(SubscriptionPlan.Pro),
                 onClick = { selectedPlan = SubscriptionPlan.Pro },
             )
             Spacer(Modifier.height(12.dp))
             PlanCard(
                 plan = SubscriptionPlan.Max,
                 selected = selectedPlan == SubscriptionPlan.Max,
+                displayPrice = products.priceFor(SubscriptionPlan.Max),
                 onClick = { selectedPlan = SubscriptionPlan.Max },
             )
 
             Spacer(Modifier.height(20.dp))
             Text(
-                "7-day free trial - monthly billing - cancel anytime",
+                if (BuildConfig.DISTRIBUTION_STORE == "aptoide") {
+                    "30-day access pass - renew anytime"
+                } else {
+                    "7-day free trial - monthly billing - cancel anytime"
+                },
                 color = OmniColors.InkMute,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Light,
@@ -166,7 +173,7 @@ fun PaywallScreen(onBack: () -> Unit) {
                     } else if (selectedProduct == null) {
                         errorDialog = PaymentError(
                             title = "Plan unavailable",
-                            message = "This subscription is not available from Google Play yet.",
+                            message = "This subscription is not available from the store yet.",
                         )
                     } else {
                         scope.launch {
@@ -234,15 +241,22 @@ private fun Throwable.toPaymentError(): PaymentError {
 
         message.contains("No active subscription", ignoreCase = true) -> PaymentError(
             title = "No subscription found",
-            message = "Google Play did not return an active Omni subscription for this account.",
+            message = "The store did not return an active Omni subscription for this account.",
         )
 
         else -> PaymentError(
             title = "Payment unavailable",
             message = message.takeIf { it.isNotBlank() }
-                ?: "Google Play could not complete this request. Please try again.",
+                ?: "The store could not complete this request. Please try again.",
         )
     }
+}
+
+private fun List<StoreProduct>.priceFor(plan: SubscriptionPlan): String {
+    return firstOrNull { it.productId == plan.productId }
+        ?.formattedPrice
+        ?.takeIf { it.isNotBlank() }
+        ?: plan.price
 }
 
 @Composable
@@ -350,6 +364,7 @@ private fun ValueCard() {
 private fun PlanCard(
     plan: SubscriptionPlan,
     selected: Boolean,
+    displayPrice: String,
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(18.dp)
@@ -390,18 +405,20 @@ private fun PlanCard(
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
-                    plan.price,
+                    displayPrice,
                     color = OmniColors.Ink,
                     fontSize = 23.sp,
                     fontWeight = FontWeight.Medium,
                 )
-                Text(
-                    "/mo",
-                    color = OmniColors.InkMute,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Light,
-                    modifier = Modifier.padding(bottom = 4.dp),
-                )
+                if (displayPrice == plan.price) {
+                    Text(
+                        "/mo",
+                        color = OmniColors.InkMute,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Light,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                }
             }
             Spacer(Modifier.height(2.dp))
             Text(

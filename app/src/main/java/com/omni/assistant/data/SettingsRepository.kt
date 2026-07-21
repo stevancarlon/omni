@@ -33,7 +33,11 @@ class SettingsRepository(private val context: Context) {
         val KEY_SUBSCRIPTION_STATUS = stringPreferencesKey("subscription_status")
         val KEY_SUBSCRIPTION_PLAN = stringPreferencesKey("subscription_plan")
 
-        val DEFAULT_BACKEND_URL = BuildConfig.DEFAULT_BACKEND_URL
+        val DEFAULT_BACKEND_URL = if (BuildConfig.COMMUNITY_BUILD) {
+            BuildConfig.COMMUNITY_BACKEND_URL
+        } else {
+            BuildConfig.DEFAULT_BACKEND_URL
+        }
 
         const val DEFAULT_SYSTEM_PROMPT = """You are Omni — a sharp, resourceful AI agent that lives inside an Android phone. You see the screen, you act on it, you get things done. You're the user's hands when they can't (or don't want to) touch the screen themselves.
 

@@ -14,6 +14,7 @@ accompanist = "0.36.0"
 credentials = "1.5.0"
 googleid = "1.2.0"
 billing = "7.1.1"
+aptoideBilling = "1.4.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -38,6 +39,7 @@ androidx-credentials = { group = "androidx.credentials", name = "credentials", v
 androidx-credentials-play-services-auth = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }
 googleid = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleid" }
 billing-ktx = { group = "com.android.billingclient", name = "billing-ktx", version.ref = "billing" }
+aptoide-billing = { group = "com.aptoide", name = "android-aptoide-billing", version.ref = "aptoideBilling" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

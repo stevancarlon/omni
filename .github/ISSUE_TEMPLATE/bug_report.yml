@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a reproducible Omni Android problem using sanitized data.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include secrets, private screenshots, messages, contacts, tokens, or security vulnerabilities.
+  - type: input
+    id: version
+    attributes:
+      label: Omni version or commit
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and Android version
+      placeholder: Pixel 8, Android 16
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Sanitized reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and sanitized logs
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed personal data and understand that vulnerabilities must be reported privately.
+          required: true

@@ -1,85 +1,51 @@
 # Omni
 
-A voice-controlled AI assistant for Android that uses LLM-driven agents to interact with your phone on your behalf.
+Omni is an experimental open-source Android agent that can see the screen and
+operate the phone through Android's Accessibility API. Give it a goal and it can
+tap, type, swipe, navigate, open apps, and adapt as the screen changes.
 
-Say **"Hey Omni"** or tap **Start Listening**, speak a command, and Omni will read your screen, decide what to do, and execute actions — tapping buttons, typing text, opening apps, scrolling, and more.
+## Demo
 
-## How it works
+<!-- Add the demo video here. GitHub supports an uploaded video URL on its own line. -->
 
-1. You give Omni a goal (e.g. "open YouTube Music and play my liked songs")
-2. Omni reads the screen using Android's Accessibility Service
-3. The Omni backend calls the LLM provider and decides what action to take
-4. Omni executes the action (tap, type, swipe, etc.)
-5. Steps 2-4 repeat until the goal is complete
+_Demo video coming soon._
 
-## Setup
+## Run it
 
-1. Install the app on your Android device (minSdk 29 / Android 10+)
-2. Continue with Google
-3. Grant microphone, accessibility, and always-on-top permissions
-4. Subscribe through Google Play to enable agent runs and wake word
-
-## Google sign-in configuration
-
-The Play Store package name is `com.omni.orb`.
-
-Google OAuth must know every signing certificate used to install the app. The Web client ID stays the same, but Google Cloud needs one Android OAuth client per package/signature pair.
-
-For internal testing builds distributed by Google Play, configure an Android OAuth client with the Play app signing certificate:
-
-1. In Play Console, open **Test and release > Setup > App signing**.
-2. Copy the SHA-1 fingerprint from **App signing key certificate**.
-3. In Google Cloud Console, create or update an **Android** OAuth client for package `com.omni.orb` and that SHA-1 fingerprint.
-4. Keep the Android app's `google_web_client_id` set to the **Web** OAuth client ID, and set the backend `GOOGLE_WEB_CLIENT_ID` to the same value.
-
-For locally installed debug/release APKs, also create an Android OAuth client for package `com.omni.orb` with this repository's upload key SHA-1:
-
-```text
-42:12:51:B9:E5:66:E0:96:53:5B:5D:9F:0F:B3:A1:3D:B3:C9:17:E6
-```
-
-## Build
+You need Android 10+, Android Studio, and a running
+[Omni backend](https://github.com/stevancarlon/omni-backend) configured with
+`COMMUNITY_MODE=true`.
 
 ```bash
-./gradlew assembleDebug
-./gradlew installDebug
+adb reverse tcp:4000 tcp:4000
+cp local.properties.example local.properties
+./gradlew assembleCommunityDebug
+adb install -r app/build/outputs/apk/community/debug/app-community-debug.apk
 ```
 
-## Backend endpoint
+Open Omni and choose **Connect to community backend**. On Android 13+, you must
+also open Omni's App Info screen and select **Allow restricted settings** before
+enabling its Accessibility service.
 
-Release builds always use:
+The community flavor is self-hosted, contains no store billing integration, and
+does not require Google sign-in.
 
-```text
-https://omni-backend-bq8e.onrender.com
-```
+> [!WARNING]
+> Omni can read screen content and interact with other apps. Only install builds
+> you trust. Do not use it to automate passwords, banking, payments, or
+> authentication challenges. This project is alpha software and is not currently
+> distributed through Google Play.
 
-Do not use `OMNI_BACKEND_URL` for release builds. Debug builds can point at a tunnel or local backend with:
+## Project docs
 
-```properties
-OMNI_DEBUG_BACKEND_URL=https://your-debug-endpoint.example
-```
+- [Architecture](ARCHITECTURE.md)
+- [Privacy model](PRIVACY.md)
+- [Roadmap](ROADMAP.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
+- [Releasing](RELEASING.md)
 
-Only use `OMNI_RELEASE_BACKEND_URL` for an intentional production backend migration.
+## License
 
-## Tech stack
-
-- **Kotlin** + **Jetpack Compose** (Material 3)
-- **Accessibility Service** for screen reading and UI automation
-- **Credential Manager** for Google sign-in
-- **Google Play Billing** for subscriptions
-- **SpeechRecognizer** fallback and backend-issued Deepgram sessions for voice input
-- **OkHttp** + **Gson** for Omni backend API calls
-- **DataStore** for settings persistence
-- **Coroutines** + **StateFlow** for reactive state
-
-## API keys
-
-No provider API keys are stored in the Android app. LLM, speech, and billing secrets are configured on the Omni backend.
-
-## Permissions
-
-- `RECORD_AUDIO` — voice commands
-- `ACCESSIBILITY_SERVICE` — screen reading and action execution
-- `INTERNET` — Omni backend API calls
-- `FOREGROUND_SERVICE` — background wake word listening
-- `QUERY_ALL_PACKAGES` — listing and launching installed apps
+Apache License 2.0. The Omni name, wordmark, and logo may not be used to imply
+that an unofficial build is operated or endorsed by the project.

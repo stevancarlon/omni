@@ -27,6 +27,8 @@ import com.omni.assistant.ui.theme.OmniButton
 @Composable
 fun WelcomeScreen(
     onContinueWithGoogle: () -> Unit,
+    onContinueWithCommunity: () -> Unit,
+    communityBuild: Boolean = false,
     signingIn: Boolean = false,
     errorMessage: String? = null,
 ) {
@@ -73,7 +75,11 @@ fun WelcomeScreen(
             )
             Spacer(Modifier.height(20.dp))
             Text(
-                "Your subscription is tied to Google.\nNo API keys, no credit packs.",
+                if (communityBuild) {
+                    "Connect to your self-hosted backend.\nNo store subscription required."
+                } else {
+                    "Your subscription is tied to Google.\nNo API keys, no credit packs."
+                },
                 color = OmniColors.InkMute,
                 fontSize = 13.sp,
                 lineHeight = 18.sp,
@@ -92,11 +98,43 @@ fun WelcomeScreen(
 
             Spacer(Modifier.weight(1f))
 
-            ContinueWithGoogleButton(
-                onClick = onContinueWithGoogle,
-                signingIn = signingIn,
-            )
+            if (communityBuild) {
+                CommunityButton(onClick = onContinueWithCommunity, signingIn = signingIn)
+            } else {
+                ContinueWithGoogleButton(
+                    onClick = onContinueWithGoogle,
+                    signingIn = signingIn,
+                )
+            }
             Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun CommunityButton(onClick: () -> Unit, signingIn: Boolean) {
+    OmniButton(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        fillMaxWidth = true,
+        contentPadding = PaddingValues(vertical = 18.dp),
+        enabled = !signingIn,
+    ) {
+        if (signingIn) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+                color = Color.White,
+            )
+        } else {
+            Text(
+                "Connect to community backend",
+                style = TextStyle(
+                    brush = OmniGradients.SilverText,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
+                ),
+            )
         }
     }
 }
@@ -138,4 +176,3 @@ private fun ContinueWithGoogleButton(onClick: () -> Unit, signingIn: Boolean) {
         }
     }
 }
-

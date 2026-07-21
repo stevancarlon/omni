@@ -17,6 +17,28 @@ android {
             localPropertiesFile.inputStream().use(::load)
         }
     }
+    fun escapedBuildConfigString(value: String): String =
+        value
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+
+    val localAptoidePublicKey = localProperties.getProperty("APTOIDE_PUBLIC_KEY")
+        ?.takeIf { it.isNotBlank() }
+        ?: "PASTE_YOUR_APTOIDE_PUBLIC_KEY_HERE"
+    val aptoidePublicKey = providers.gradleProperty("APTOIDE_PUBLIC_KEY")
+        .orElse(providers.environmentVariable("APTOIDE_PUBLIC_KEY"))
+        .orElse(localAptoidePublicKey)
+        .get()
+        .let(::escapedBuildConfigString)
+    val communityBackendUrl = providers.gradleProperty("OMNI_COMMUNITY_BACKEND_URL")
+        .orElse(providers.environmentVariable("OMNI_COMMUNITY_BACKEND_URL"))
+        .orElse(
+            localProperties.getProperty("OMNI_DEBUG_BACKEND_URL")
+                ?.takeIf { it.isNotBlank() }
+                ?: "http://127.0.0.1:4000"
+        )
+        .get()
+        .let(::escapedBuildConfigString)
     val localBackendUrl = localProperties.getProperty("OMNI_DEBUG_BACKEND_URL")
         ?.takeIf { it.isNotBlank() }
         ?: localProperties.getProperty("OMNI_BACKEND_URL")
@@ -33,31 +55,76 @@ android {
         .orElse(productionBackendUrl)
         .get()
 
-    signingConfigs {
-        create("release") {
-            storeFile = file("../../omni-keystore.jks")
-            storePassword = "changeme123"
-            keyAlias = "omni"
-            keyPassword = "changeme123"
+    fun privateValue(name: String): String? =
+        providers.gradleProperty(name)
+            .orElse(providers.environmentVariable(name))
+            .orNull
+            ?.takeIf { it.isNotBlank() }
+
+    val releaseStoreFile = privateValue("OMNI_RELEASE_STORE_FILE")
+    val releaseStorePassword = privateValue("OMNI_RELEASE_STORE_PASSWORD")
+    val releaseKeyAlias = privateValue("OMNI_RELEASE_KEY_ALIAS")
+    val releaseKeyPassword = privateValue("OMNI_RELEASE_KEY_PASSWORD")
+
+    val privateReleaseSigningConfig =
+        if (
+            releaseStoreFile != null &&
+            releaseStorePassword != null &&
+            releaseKeyAlias != null &&
+            releaseKeyPassword != null
+        ) {
+            signingConfigs.create("release") {
+                storeFile = file(releaseStoreFile)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        } else {
+            null
         }
-    }
 
     defaultConfig {
         applicationId = "com.omni.orb"
         minSdk = 29
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.0.2"
+        versionCode = 5
+        versionName = "1.0.4"
+    }
+
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("googlePlay") {
+            dimension = "distribution"
+            buildConfigField("String", "DISTRIBUTION_STORE", "\"google_play\"")
+            buildConfigField("String", "APTOIDE_PUBLIC_KEY", "\"\"")
+            buildConfigField("boolean", "COMMUNITY_BUILD", "false")
+            buildConfigField("String", "COMMUNITY_BACKEND_URL", "\"\"")
+        }
+        create("aptoide") {
+            dimension = "distribution"
+            buildConfigField("String", "DISTRIBUTION_STORE", "\"aptoide\"")
+            buildConfigField("String", "APTOIDE_PUBLIC_KEY", "\"$aptoidePublicKey\"")
+            buildConfigField("boolean", "COMMUNITY_BUILD", "false")
+            buildConfigField("String", "COMMUNITY_BACKEND_URL", "\"\"")
+        }
+        create("community") {
+            dimension = "distribution"
+            applicationIdSuffix = ".community"
+            versionNameSuffix = "-community"
+            buildConfigField("String", "DISTRIBUTION_STORE", "\"community\"")
+            buildConfigField("String", "APTOIDE_PUBLIC_KEY", "\"\"")
+            buildConfigField("boolean", "COMMUNITY_BUILD", "true")
+            buildConfigField("String", "COMMUNITY_BACKEND_URL", "\"$communityBackendUrl\"")
+        }
     }
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("release")
             buildConfigField("String", "DEFAULT_BACKEND_URL", "\"$debugBackendUrl\"")
         }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = privateReleaseSigningConfig
             buildConfigField("String", "DEFAULT_BACKEND_URL", "\"$releaseBackendUrl\"")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -99,7 +166,8 @@ dependencies {
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
-    implementation(libs.billing.ktx)
+    add("googlePlayImplementation", libs.billing.ktx)
+    add("aptoideImplementation", libs.aptoide.billing)
     implementation("com.google.android.material:material:1.12.0")
     debugImplementation(libs.androidx.ui.tooling)
 }

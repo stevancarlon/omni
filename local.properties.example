@@ -1,0 +1,19 @@
+## Copy this file to local.properties and fill in local/private values.
+## local.properties is git-ignored.
+
+## Optional local backend override for debug builds.
+# With `adb reverse tcp:4000 tcp:4000`, use http://127.0.0.1:4000.
+OMNI_DEBUG_BACKEND_URL=http://127.0.0.1:4000
+# OMNI_COMMUNITY_BACKEND_URL=https://your-self-hosted-backend.example
+
+## Optional release backend override. Defaults to production if omitted.
+# OMNI_RELEASE_BACKEND_URL=https://omni-backend-bq8e.onrender.com
+
+## Required for Aptoide builds.
+APTOIDE_PUBLIC_KEY=paste-aptoide-connect-public-key-here
+
+## Optional release signing values. Never commit real values.
+# OMNI_RELEASE_STORE_FILE=/absolute/path/to/omni-release.jks
+# OMNI_RELEASE_STORE_PASSWORD=change-me
+# OMNI_RELEASE_KEY_ALIAS=omni
+# OMNI_RELEASE_KEY_PASSWORD=change-me

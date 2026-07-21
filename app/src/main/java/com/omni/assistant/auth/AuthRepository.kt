@@ -77,6 +77,36 @@ class AuthRepository(private val app: OmniApplication) {
         )
     }
 
+    suspend fun signInForCommunity(): AuthSession = withContext(Dispatchers.IO) {
+        val backendUrl = app.settingsRepository.backendUrl.first().trimEnd('/')
+        val body = gson.toJson(mapOf("device_name" to "android-community"))
+        val request = Request.Builder()
+            .url("$backendUrl/api/auth/community")
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .header("Content-Type", "application/json")
+            .build()
+
+        val response = client.newCall(request).execute()
+        val responseBody = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            throw IOException(
+                "Community sign-in failed (${response.code}). " +
+                    "Start a self-hosted backend with COMMUNITY_MODE=true."
+            )
+        }
+
+        val json = gson.fromJson(responseBody, JsonObject::class.java)
+        val user = json.getAsJsonObject("user")
+        AuthSession(
+            authToken = firstString(json, "authToken", "token", "accessToken")
+                ?: throw IOException("Community sign-in did not return an auth token"),
+            email = firstString(user, "email").orEmpty(),
+            name = firstString(user, "name") ?: "Community user",
+            subscriptionStatus = subscriptionStatus(json),
+            subscriptionPlan = subscriptionPlan(json),
+        )
+    }
+
     suspend fun refreshSession(): AuthSession = withContext(Dispatchers.IO) {
         val backendUrl = app.settingsRepository.backendUrl.first().trimEnd('/')
         val authToken = app.settingsRepository.authToken.first()

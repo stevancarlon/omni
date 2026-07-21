@@ -1,0 +1,17 @@
+# Private signing material
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+
+# Local agent and editor state
+/.agents
+/.claude
+/.codex
+
+# Private working material outside the product repositories
+/OVERNIGHT_CHANGES.md
+/linkedin-post-draft.txt
+/nul
+/remotion-video/

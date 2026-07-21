@@ -6,9 +6,7 @@ tap, type, swipe, navigate, open apps, and adapt as the screen changes.
 
 ## Demo
 
-<!-- Replace the line below with your uploaded demo video URL. -->
-
-_Demo video coming soon._
+https://github.com/user-attachments/assets/a493cc3c-ee82-4cf8-93a8-307a6a66d0bf
 
 ## Repository
 

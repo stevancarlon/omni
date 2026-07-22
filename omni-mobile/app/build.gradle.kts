@@ -170,4 +170,6 @@ dependencies {
     add("aptoideImplementation", libs.aptoide.billing)
     implementation("com.google.android.material:material:1.12.0")
     debugImplementation(libs.androidx.ui.tooling)
+    testImplementation("junit:junit:4.13.2")
 }
+

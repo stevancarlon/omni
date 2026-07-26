@@ -205,6 +205,9 @@ class DeepgramClient(
             val rec = try {
                 AudioRecord(src, SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT, bufferSize * 2)
+            } catch (_: SecurityException) {
+                onError("Microphone permission not granted")
+                return
             } catch (_: Exception) { continue }
             if (rec.state == AudioRecord.STATE_INITIALIZED) {
                 Log.d(TAG, "Using audio source=$src")
@@ -221,7 +224,14 @@ class DeepgramClient(
             return
         }
 
-        audioRecord?.startRecording()
+        try {
+            audioRecord?.startRecording()
+        } catch (_: SecurityException) {
+            audioRecord?.release()
+            audioRecord = null
+            onError("Microphone permission not granted")
+            return
+        }
         isRecording = true
 
         recordingJob = scope.launch {
@@ -349,13 +359,25 @@ class DeepgramClient(
                     AudioFormat.ENCODING_PCM_16BIT,
                     bufferSize * 2,
                 )
+            } catch (_: SecurityException) {
+                isRecording = false
+                onError("Microphone permission not granted")
+                return sources.lastIndex
             } catch (e: Exception) {
                 Log.w(TAG, "Audio source=$source failed: ${e.message}")
                 continue
             }
             if (rec.state == AudioRecord.STATE_INITIALIZED) {
                 audioRecord = rec
-                rec.startRecording()
+                try {
+                    rec.startRecording()
+                } catch (_: SecurityException) {
+                    rec.release()
+                    audioRecord = null
+                    isRecording = false
+                    onError("Microphone permission not granted")
+                    return sources.lastIndex
+                }
                 Log.w(TAG, "Wake audio source was silent; switched to source=$source")
                 return index
             }

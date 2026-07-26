@@ -2,13 +2,12 @@ import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
 android {
     namespace = "com.omni.assistant"
-    compileSdk = 35
+    compileSdk = 37
     val productionBackendUrl = "https://omni-backend-bq8e.onrender.com"
 
     val localProperties = Properties().apply {
@@ -136,9 +135,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    kotlinOptions {
-        jvmTarget = "11"
-    }
     buildFeatures {
         compose = true
         buildConfig = true
@@ -168,8 +164,7 @@ dependencies {
     implementation(libs.googleid)
     add("googlePlayImplementation", libs.billing.ktx)
     add("aptoideImplementation", libs.aptoide.billing)
-    implementation("com.google.android.material:material:1.12.0")
+    implementation("com.google.android.material:material:1.14.0")
     debugImplementation(libs.androidx.ui.tooling)
     testImplementation("junit:junit:4.13.2")
 }
-
